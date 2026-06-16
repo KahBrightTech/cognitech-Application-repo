@@ -1,0 +1,40 @@
+services:
+
+  # ── FastAPI Backend ──────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: hirepath-backend
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"          # expose directly for debugging (optional)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - hirepath-net
+
+  # ── React Frontend (nginx) ───────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: hirepath-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"              # main app entrypoint
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - hirepath-net
+
+networks:
+  hirepath-net:
+    driver: bridge
