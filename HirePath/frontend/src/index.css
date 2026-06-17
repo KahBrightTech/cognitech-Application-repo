@@ -3,12 +3,8 @@
 @tailwind utilities;
 
 @layer base {
-  * {
-    box-sizing: border-box;
-  }
-  html {
-    scroll-behavior: smooth;
-  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -32,25 +28,20 @@
            transition-all duration-200 active:scale-95;
   }
 
-  .source-badge-linkedin   { @apply bg-blue-100 text-blue-700 border border-blue-200; }
-  .source-badge-indeed     { @apply bg-indigo-100 text-indigo-700 border border-indigo-200; }
-  .source-badge-glassdoor  { @apply bg-green-100 text-green-700 border border-green-200; }
-  .source-badge-monster    { @apply bg-purple-100 text-purple-700 border border-purple-200; }
-  .source-badge-ziprecruiter { @apply bg-orange-100 text-orange-700 border border-orange-200; }
+  .source-badge-linkedin    { @apply bg-blue-100   text-blue-700   border border-blue-200;   }
+  .source-badge-indeed      { @apply bg-indigo-100 text-indigo-700 border border-indigo-200; }
+  .source-badge-glassdoor   { @apply bg-green-100  text-green-700  border border-green-200;  }
+  .source-badge-monster     { @apply bg-purple-100 text-purple-700 border border-purple-200; }
+  .source-badge-ziprecruiter{ @apply bg-orange-100 text-orange-700 border border-orange-200; }
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar { width: 6px; }
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar       { width: 6px; }
 ::-webkit-scrollbar-track { background: #f1f5f9; }
 ::-webkit-scrollbar-thumb { background: #c7d2fe; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #818cf8; }
 
-/* Drag-over highlight */
-.drag-over {
-  @apply border-violet-500 bg-violet-50;
-}
-
-/* Animated gradient background */
+/* ─── Animated gradient background ─── */
 .animated-bg {
   background: linear-gradient(-45deg, #7c3aed, #4f46e5, #0ea5e9, #6366f1);
   background-size: 400% 400%;
@@ -58,21 +49,74 @@
 }
 
 @keyframes gradientShift {
-  0%   { background-position: 0% 50%; }
+  0%   { background-position: 0%   50%; }
   50%  { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+  100% { background-position: 0%   50%; }
 }
 
-/* Progress ring animation */
+/* ─── Hero dot-grid pattern ─── */
+.hero-grid-pattern {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+/* ─── Floating cards on hero image ─── */
+.float-card {
+  animation: float 3.5s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px);  }
+  50%       { transform: translateY(-8px); }
+}
+
+/* ─── Progress ring ─── */
 @keyframes progressDraw {
   from { stroke-dashoffset: 283; }
 }
-
 .progress-ring {
   animation: progressDraw 1.2s ease-out forwards;
 }
 
-/* Staggered card animation */
+/* ─── Staggered card entrance ─── */
 .job-card-enter {
   animation: slideUp 0.4s ease-out both;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+/* ─── Skill panel slide-in ─── */
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+/* ─── Searching animation extras ─── */
+@keyframes pulseSlow {
+  0%, 100% { opacity: 0.2; }
+  50%       { opacity: 0.4; }
+}
+.animate-pulse-slow {
+  animation: pulseSlow 2s ease-in-out infinite;
+}
+
+@keyframes spinSlow {
+  from { transform: rotate(0deg);   }
+  to   { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: spinSlow 8s linear infinite;
+}
+
+/* ─── Message fade-in ─── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
 }
