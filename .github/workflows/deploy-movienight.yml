@@ -1,4 +1,4 @@
-name: Build and Deploy MovieNight to EKS
+name: Deploy MovieNight
 
 on:
   push:
@@ -6,23 +6,34 @@ on:
       - main
     paths:
       - 'MovieNight/**'
+      - '.github/workflows/deploy-movienight.yml'
   workflow_dispatch:
+    inputs:
+      deployment_action:
+        description: 'Deployment action'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - build-only
+        default: 'deploy'
 
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: int-production-use1-ecs
-  EKS_CLUSTER_NAME: int-production-use1-prod-novutech-eks-cluster  
+  EKS_CLUSTER_NAME: int-production-use1-prod-novutech-eks-cluster
   K8S_NAMESPACE: movienight
   IAM_ROLE: arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role
 
 permissions:
-  id-token: write   # Required for OIDC
-  contents: read    # Required for checkout
+  id-token: write
+  contents: read
 
 jobs:
   build-and-deploy:
-    name: Build and Deploy
+    name: Build and Deploy MovieNight
     runs-on: ubuntu-latest
+    environment: production
     
     steps:
     - name: Checkout code
@@ -44,6 +55,35 @@ jobs:
       run: |
         echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
 
+    - name: Get latest version from ECR and auto-increment
+      id: version
+      run: |
+        echo "🔍 Checking latest version in ECR..."
+        
+        # Get all version tags from ECR for backend
+        VERSIONS=$(aws ecr describe-images \
+          --repository-name ${{ env.ECR_REPOSITORY }} \
+          --region ${{ env.AWS_REGION }} \
+          --query 'imageDetails[*].imageTags[]' \
+          --output text | tr '\t' '\n' | grep -E '^movienight-backend-v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/movienight-backend-v//' || echo "")
+        
+        if [ -z "$VERSIONS" ]; then
+          NEW_VERSION="v1.0.0"
+          echo "📌 No previous versions found. Starting with ${NEW_VERSION}"
+        else
+          LATEST_VERSION=$(echo "$VERSIONS" | sort -V | tail -n 1)
+          echo "📌 Latest version: v${LATEST_VERSION}"
+          
+          MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
+          MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
+          PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="v${MAJOR}.${MINOR}.${NEW_PATCH}"
+          echo "🚀 Auto-incrementing to: ${NEW_VERSION}"
+        fi
+        
+        echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
@@ -53,7 +93,7 @@ jobs:
         context: ./MovieNight/backend
         push: true
         tags: |
-          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-${{ github.sha }}
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-${{ steps.version.outputs.version }}
           ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -64,69 +104,197 @@ jobs:
         context: ./MovieNight/frontend
         push: true
         tags: |
-          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-${{ github.sha }}
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-${{ steps.version.outputs.version }}
           ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Install kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'latest'
+    - name: Deployment Decision
+      id: deploy-decision
+      run: |
+        echo "🎯 Version ${{ steps.version.outputs.version }} built and pushed to ECR"
+        echo ""
+        
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          DEPLOY_ACTION="${{ github.event.inputs.deployment_action }}"
+        else
+          DEPLOY_ACTION="deploy"
+        fi
+        
+        echo "action=${DEPLOY_ACTION}" >> $GITHUB_OUTPUT
+        
+        if [ "$DEPLOY_ACTION" == "build-only" ]; then
+          echo "⏹️  Deployment skipped - build only"
+          echo "📦 Images available in ECR:"
+          echo "   - movienight-backend-${{ steps.version.outputs.version }}"
+          echo "   - movienight-frontend-${{ steps.version.outputs.version }}"
+        else
+          echo "✅ Proceeding with deployment"
+        fi
 
     - name: Update kubeconfig
+      if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
         aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
     - name: Create namespace if not exists
+      if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
         kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-    - name: Create or update secrets
+    - name: Create secrets
+      if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
         kubectl create secret generic movienight-secrets \
           --from-literal=tmdb-api-key=${{ secrets.TMDB_API_KEY }} \
-          -n ${{ env.K8S_NAMESPACE }} \
+          --namespace ${{ env.K8S_NAMESPACE }} \
           --dry-run=client -o yaml | kubectl apply -f -
 
-    - name: Update deployment manifests with image tags
+    - name: Deploy backend
+      if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
-        export ECR_REGISTRY="${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
-        export IMAGE_TAG="${{ github.sha }}"
-        
-        # Update backend deployment
-        sed -i "s|image:.*movienight-backend.*|image: ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:movienight-backend-${IMAGE_TAG}|g" MovieNight/k8s/backend-deployment.yaml
-        
-        # Update frontend deployment
-        sed -i "s|image:.*movienight-frontend.*|image: ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:movienight-frontend-${IMAGE_TAG}|g" MovieNight/k8s/frontend-deployment.yaml
+        cat <<EOF | kubectl apply -f -
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: movienight-backend
+          namespace: ${{ env.K8S_NAMESPACE }}
+          labels:
+            app: movienight
+            component: backend
+            version: ${{ steps.version.outputs.version }}
+        spec:
+          replicas: 2
+          selector:
+            matchLabels:
+              app: movienight
+              component: backend
+          template:
+            metadata:
+              labels:
+                app: movienight
+                component: backend
+                version: ${{ steps.version.outputs.version }}
+            spec:
+              containers:
+              - name: backend
+                image: ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-${{ steps.version.outputs.version }}
+                ports:
+                - containerPort: 8000
+                env:
+                - name: TMDB_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: movienight-secrets
+                      key: tmdb-api-key
+                resources:
+                  requests:
+                    cpu: 250m
+                    memory: 512Mi
+                  limits:
+                    cpu: 500m
+                    memory: 1Gi
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: movienight-backend
+          namespace: ${{ env.K8S_NAMESPACE }}
+        spec:
+          selector:
+            app: movienight
+            component: backend
+          ports:
+          - port: 8000
+            targetPort: 8000
+          type: ClusterIP
+        EOF
 
-    - name: Apply Kubernetes manifests
+    - name: Deploy frontend
+      if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
-        kubectl apply -f MovieNight/k8s/namespace.yaml
-        kubectl apply -f MovieNight/k8s/configmap.yaml
-        kubectl apply -f MovieNight/k8s/backend-deployment.yaml
-        kubectl apply -f MovieNight/k8s/frontend-deployment.yaml
-        kubectl apply -f MovieNight/k8s/ingress.yaml
-        kubectl apply -f MovieNight/k8s/hpa.yaml
+        cat <<EOF | kubectl apply -f -
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: movienight-frontend
+          namespace: ${{ env.K8S_NAMESPACE }}
+          labels:
+            app: movienight
+            component: frontend
+            version: ${{ steps.version.outputs.version }}
+        spec:
+          replicas: 2
+          selector:
+            matchLabels:
+              app: movienight
+              component: frontend
+          template:
+            metadata:
+              labels:
+                app: movienight
+                component: frontend
+                version: ${{ steps.version.outputs.version }}
+            spec:
+              containers:
+              - name: frontend
+                image: ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-${{ steps.version.outputs.version }}
+                ports:
+                - containerPort: 80
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 256Mi
+                  limits:
+                    cpu: 200m
+                    memory: 512Mi
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: movienight-frontend
+          namespace: ${{ env.K8S_NAMESPACE }}
+        spec:
+          selector:
+            app: movienight
+            component: frontend
+          ports:
+          - port: 80
+            targetPort: 80
+          type: ClusterIP
+        EOF
 
-    - name: Wait for rollout
+    - name: Wait for deployment rollout
+      if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
         kubectl rollout status deployment/movienight-backend -n ${{ env.K8S_NAMESPACE }} --timeout=5m
         kubectl rollout status deployment/movienight-frontend -n ${{ env.K8S_NAMESPACE }} --timeout=5m
 
-    - name: Get deployment status
+    - name: Verify deployment
+      if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
-        echo "=== Deployment Status ==="
+        echo "=== Deployments ==="
+        kubectl get deployments -n ${{ env.K8S_NAMESPACE }}
+        echo ""
+        echo "=== Pods ==="
         kubectl get pods -n ${{ env.K8S_NAMESPACE }}
         echo ""
         echo "=== Services ==="
         kubectl get svc -n ${{ env.K8S_NAMESPACE }}
-        echo ""
-        echo "=== Ingress ==="
-        kubectl get ingress -n ${{ env.K8S_NAMESPACE }}
 
-    - name: Get ALB URL
+    - name: Summary
       run: |
-        ALB_URL=$(kubectl get ingress movienight-ingress -n ${{ env.K8S_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
-        echo "🍿 MovieNight deployed!"
-        echo "🔗 Access URL: http://${ALB_URL}"
+        echo "📋 Build Summary"
+        echo "================="
+        echo "Version: ${{ steps.version.outputs.version }}"
+        echo "Action: ${{ steps.deploy-decision.outputs.action }}"
+        echo "Backend Image: movienight-backend-${{ steps.version.outputs.version }}"
+        echo "Frontend Image: movienight-frontend-${{ steps.version.outputs.version }}"
+        echo ""
+        if [ "${{ steps.deploy-decision.outputs.action }}" == "build-only" ]; then
+          echo "⏹️  Deployment was skipped"
+          echo "📦 Images are ready in ECR for manual deployment"
+        else
+          echo "✅ Deployment completed successfully"
+          echo "🍿 MovieNight is running in namespace: ${{ env.K8S_NAMESPACE }}"
+        fi

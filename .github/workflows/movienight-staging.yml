@@ -6,13 +6,23 @@ on:
       - staging
     paths:
       - 'MovieNight/**'
-      - '.github/workflows/deploy-movienight-staging-helm.yml'
+      - '.github/workflows/movienight-staging.yml'
   workflow_dispatch:
+    inputs:
+      deployment_action:
+        description: 'Deployment action'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - build-only
+        default: 'deploy'
 
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: int-production-use1-ecs
-  EKS_CLUSTER_NAME: your-staging-eks-cluster  # Update this
+  EKS_CLUSTER_NAME: int-production-use1-prod-novutech-eks-cluster
+  K8S_NAMESPACE: movienight-staging
   IAM_ROLE: arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role
   ENVIRONMENT: staging
 
@@ -105,11 +115,38 @@ jobs:
       with:
         version: 'latest'
 
+    - name: Deployment Decision
+      id: deploy-decision
+      run: |
+        echo "🎯 Version ${{ steps.version.outputs.version }} built and pushed to ECR"
+        echo ""
+        
+        # Check if manual workflow dispatch
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          DEPLOY_ACTION="${{ github.event.inputs.deployment_action }}"
+        else
+          # Auto-deploy on push to staging
+          DEPLOY_ACTION="deploy"
+        fi
+        
+        echo "action=${DEPLOY_ACTION}" >> $GITHUB_OUTPUT
+        
+        if [ "$DEPLOY_ACTION" == "build-only" ]; then
+          echo "⏹️  Deployment skipped - build only"
+          echo "📦 Images are available in ECR:"
+          echo "   - movienight-backend-staging-${{ steps.version.outputs.version }}"
+          echo "   - movienight-frontend-staging-${{ steps.version.outputs.version }}"
+        else
+          echo "✅ Proceeding with deployment to staging"
+        fi
+
     - name: Update kubeconfig
+      if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
         aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
     - name: Deploy with Helm
+      if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
         helm upgrade --install movienight ./MovieNight/helm/movienight \
           --namespace movienight-staging \

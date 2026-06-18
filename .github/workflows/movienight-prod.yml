@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - 'MovieNight/**'
-      - '.github/workflows/deploy-movienight-prod-helm.yml'
+      - '.github/workflows/movienight-prod.yml'
   workflow_dispatch:
     inputs:
       deployment_action:
@@ -15,13 +15,14 @@ on:
         type: choice
         options:
           - deploy
-          - terminate
+          - build-only
         default: 'deploy'
 
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: int-production-use1-ecs
-  EKS_CLUSTER_NAME: your-prod-eks-cluster  # Update this
+  EKS_CLUSTER_NAME: int-production-use1-prod-novutech-eks-cluster
+  K8S_NAMESPACE: movienight
   IAM_ROLE: arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role
   ENVIRONMENT: production
 
@@ -140,13 +141,13 @@ jobs:
         
         echo "action=${DEPLOY_ACTION}" >> $GITHUB_OUTPUT
         
-        if [ "$DEPLOY_ACTION" == "terminate" ]; then
-          echo "⏹️  Deployment skipped by user choice"
+        if [ "$DEPLOY_ACTION" == "build-only" ]; then
+          echo "⏹️  Deployment skipped - build only"
           echo "📦 Images are available in ECR:"
           echo "   - movienight-backend-${{ steps.version.outputs.version }}"
           echo "   - movienight-frontend-${{ steps.version.outputs.version }}"
         else
-          echo "✅ Proceeding with deployment"
+          echo "✅ Proceeding with deployment to production"
         fi
 
     - name: Update kubeconfig
@@ -157,13 +158,13 @@ jobs:
     - name: Backup current release
       if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
-        helm get values movienight -n movienight > /tmp/previous-values.yaml || echo "No previous release"
+        helm get values movienight -n ${{ env.K8S_NAMESPACE }} > /tmp/previous-values.yaml || echo "No previous release"
 
     - name: Deploy with Helm
       if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
         helm upgrade --install movienight ./MovieNight/helm/movienight \
-          --namespace movienight \
+          --namespace ${{ env.K8S_NAMESPACE }} \
           --create-namespace \
           --values ./MovieNight/helm/movienight/values-prod.yaml \
           --set backend.image.tag=movienight-backend-${{ steps.version.outputs.version }} \
@@ -178,25 +179,25 @@ jobs:
       if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
         echo "=== Helm Release ==="
-        helm list -n movienight
+        helm list -n ${{ env.K8S_NAMESPACE }}
         echo ""
         echo "=== Deployment History ==="
-        helm history movienight -n movienight
+        helm history movienight -n ${{ env.K8S_NAMESPACE }}
         echo ""
         echo "=== Pods ==="
-        kubectl get pods -n movienight
+        kubectl get pods -n ${{ env.K8S_NAMESPACE }}
         echo ""
         echo "=== Services ==="
-        kubectl get svc -n movienight
+        kubectl get svc -n ${{ env.K8S_NAMESPACE }}
         echo ""
         echo "=== Ingress ==="
-        kubectl get ingress -n movienight
+        kubectl get ingress -n ${{ env.K8S_NAMESPACE }}
 
     - name: Run smoke tests
       if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
         echo "Running smoke tests..."
-        ALB_URL=$(kubectl get ingress movienight-ingress -n movienight -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        ALB_URL=$(kubectl get ingress movienight-ingress -n ${{ env.K8S_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
         
         # Test backend health
         echo "Testing backend health..."
@@ -211,11 +212,11 @@ jobs:
     - name: Get ALB URL
       if: steps.deploy-decision.outputs.action == 'deploy'
       run: |
-        ALB_URL=$(kubectl get ingress movienight-ingress -n movienight -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        ALB_URL=$(kubectl get ingress movienight-ingress -n ${{ env.K8S_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
         echo "🍿 MovieNight Production deployed!"
         echo "🔗 Access URL: http://${ALB_URL}"
-        echo "📊 Release: $(helm list -n movienight -o json | jq -r '.[0].chart')"
-        echo "🚀 Revision: $(helm list -n movienight -o json | jq -r '.[0].revision')"
+        echo "📊 Release: $(helm list -n ${{ env.K8S_NAMESPACE }} -o json | jq -r '.[0].chart')"
+        echo "🚀 Revision: $(helm list -n ${{ env.K8S_NAMESPACE }} -o json | jq -r '.[0].revision')"
         echo "🏷️  Version: ${{ steps.version.outputs.version }}"
         echo "📦 Images:"
         echo "   - movienight-backend-${{ steps.version.outputs.version }}"
@@ -230,7 +231,7 @@ jobs:
         echo "Backend Image: movienight-backend-${{ steps.version.outputs.version }}"
         echo "Frontend Image: movienight-frontend-${{ steps.version.outputs.version }}"
         echo ""
-        if [ "${{ steps.deploy-decision.outputs.action }}" == "terminate" ]; then
+        if [ "${{ steps.deploy-decision.outputs.action }}" == "build-only" ]; then
           echo "⏹️  Deployment was skipped"
           echo "📦 Images are ready in ECR for manual deployment"
         else
@@ -241,4 +242,4 @@ jobs:
       if: failure() && steps.deploy-decision.outputs.action == 'deploy'
       run: |
         echo "❌ Deployment failed! Rolling back..."
-        helm rollback movienight -n movienight
+        helm rollback movienight -n ${{ env.K8S_NAMESPACE }}
