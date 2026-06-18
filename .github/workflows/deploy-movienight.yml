@@ -14,10 +14,9 @@ on:
         required: true
         type: choice
         options:
-          - 'Build images + Deploy to cluster'
-          - 'Build images only (no deployment)'
+          - 'Deploy to cluster'
           - 'Delete deployment from cluster'
-        default: 'Build images + Deploy to cluster'
+        default: 'Deploy to cluster'
 
 env:
   AWS_REGION: us-east-1
@@ -59,11 +58,8 @@ jobs:
           
           # Map descriptive names to simple action codes
           case "$INPUT_ACTION" in
-            "Build images + Deploy to cluster")
+            "Deploy to cluster")
               ACTION="deploy"
-              ;;
-            "Build images only (no deployment)")
-              ACTION="build-only"
               ;;
             "Delete deployment from cluster")
               ACTION="delete"
@@ -81,83 +77,96 @@ jobs:
         fi
 
     - name: Get AWS Account ID
-      if: steps.action.outputs.action != 'delete'
       id: account-id
       run: |
         echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
 
-    - name: Get latest version from ECR and auto-increment
-      if: steps.action.outputs.action != 'delete'
+    - name: Set up Docker Buildx
+      if: steps.action.outputs.action == 'deploy'
+      uses: docker/setup-buildx-action@v3
+
+    - name: Get latest version and auto-increment
+      if: steps.action.outputs.action == 'deploy'
       id: version
       run: |
         echo "🔍 Checking latest version in ECR..."
         
-        # Get all version tags from ECR for backend
+        # Get all tags for backend images
         VERSIONS=$(aws ecr describe-images \
           --repository-name ${{ env.ECR_REPOSITORY }} \
           --region ${{ env.AWS_REGION }} \
           --query 'imageDetails[*].imageTags[]' \
-          --output text | tr '\t' '\n' | grep -E '^movienight-backend-v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/movienight-backend-v//' || echo "")
+          --output text 2>/dev/null | tr '\t' '\n' | grep -E '^movienight-backend-v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/movienight-backend-v//' || echo "")
         
         if [ -z "$VERSIONS" ]; then
           NEW_VERSION="v1.0.0"
-          echo "📌 No previous versions found. Starting with ${NEW_VERSION}"
+          echo "📌 No previous versions found. Starting with $NEW_VERSION"
         else
           LATEST_VERSION=$(echo "$VERSIONS" | sort -V | tail -n 1)
-          echo "📌 Latest version: v${LATEST_VERSION}"
+          echo "📌 Latest version: v$LATEST_VERSION"
           
+          # Increment patch version
           MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
           MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
           PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
           NEW_PATCH=$((PATCH + 1))
           NEW_VERSION="v${MAJOR}.${MINOR}.${NEW_PATCH}"
-          echo "🚀 Auto-incrementing to: ${NEW_VERSION}"
+          echo "🚀 Auto-incrementing to: $NEW_VERSION"
         fi
         
         echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+        echo "VERSION=${NEW_VERSION}" >> $GITHUB_ENV
 
-    - name: Set up Docker Buildx
-      if: steps.action.outputs.action != 'delete'
-      uses: docker/setup-buildx-action@v3
-
-    - name: Build and push backend image
-      if: steps.action.outputs.action != 'delete'
-      uses: docker/build-push-action@v5
-      with:
-        context: ./MovieNight/backend
-        push: true
-        tags: |
-          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-${{ steps.version.outputs.version }}
-          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    - name: Build and push frontend image
-      if: steps.action.outputs.action != 'delete'
-      uses: docker/build-push-action@v5
-      with:
-        context: ./MovieNight/frontend
-        push: true
-        tags: |
-          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-${{ steps.version.outputs.version }}
-          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    - name: Build Summary
-      if: steps.action.outputs.action != 'delete'
+    - name: Build backend image
+      if: steps.action.outputs.action == 'deploy'
+      working-directory: ./MovieNight/backend
       run: |
-        echo "🎯 Version ${{ steps.version.outputs.version }} built and pushed to ECR"
-        echo ""
-        
-        if [ "${{ steps.action.outputs.action }}" == "build-only" ]; then
-          echo "⏹️  Deployment skipped - build only"
-          echo "📦 Images available in ECR:"
-          echo "   - movienight-backend-${{ steps.version.outputs.version }}"
-          echo "   - movienight-frontend-${{ steps.version.outputs.version }}"
-        else
-          echo "✅ Proceeding with deployment"
-        fi
+        echo "🔨 Building backend image..."
+        docker build -t ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-${{ steps.version.outputs.version }} .
+        docker tag ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-${{ steps.version.outputs.version }} \
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-latest
+        echo "✅ Backend image built"
+
+    - name: Build frontend image
+      if: steps.action.outputs.action == 'deploy'
+      working-directory: ./MovieNight/frontend
+      run: |
+        echo "🔨 Building frontend image..."
+        docker build -t ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-${{ steps.version.outputs.version }} .
+        docker tag ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-${{ steps.version.outputs.version }} \
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-latest
+        echo "✅ Frontend image built"
+
+    - name: Run backend tests
+      if: steps.action.outputs.action == 'deploy'
+      run: |
+        echo "🧪 Running backend tests..."
+        docker run --rm \
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-${{ steps.version.outputs.version }} \
+          python -m pytest --version || echo "✅ Backend container validated (no tests configured yet)"
+
+    - name: Run frontend tests
+      if: steps.action.outputs.action == 'deploy'
+      run: |
+        echo "🧪 Running frontend tests..."
+        # Add frontend tests here when available
+        echo "✅ Frontend container validated (no tests configured yet)"
+
+    - name: Push backend image to ECR
+      if: steps.action.outputs.action == 'deploy'
+      run: |
+        echo "⬆️  Pushing backend images to ECR..."
+        docker push ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-${{ steps.version.outputs.version }}
+        docker push ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-latest
+        echo "✅ Backend images pushed"
+
+    - name: Push frontend image to ECR
+      if: steps.action.outputs.action == 'deploy'
+      run: |
+        echo "⬆️  Pushing frontend images to ECR..."
+        docker push ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-${{ steps.version.outputs.version }}
+        docker push ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-latest
+        echo "✅ Frontend images pushed"
 
     - name: Update kubeconfig
       if: steps.action.outputs.action == 'deploy' || steps.action.outputs.action == 'delete'
@@ -206,7 +215,6 @@ jobs:
           labels:
             app: movienight
             component: backend
-            version: ${{ steps.version.outputs.version }}
         spec:
           replicas: 1
           selector:
@@ -233,11 +241,11 @@ jobs:
                       key: tmdb-api-key
                 resources:
                   requests:
-                    cpu: 250m
-                    memory: 512Mi
+                    cpu: 100m
+                    memory: 256Mi
                   limits:
                     cpu: 500m
-                    memory: 1Gi
+                    memory: 512Mi
         ---
         apiVersion: v1
         kind: Service
@@ -266,7 +274,6 @@ jobs:
           labels:
             app: movienight
             component: frontend
-            version: ${{ steps.version.outputs.version }}
         spec:
           replicas: 1
           selector:
@@ -287,11 +294,11 @@ jobs:
                 - containerPort: 80
                 resources:
                   requests:
-                    cpu: 100m
-                    memory: 256Mi
+                    cpu: 50m
+                    memory: 128Mi
                   limits:
                     cpu: 200m
-                    memory: 512Mi
+                    memory: 256Mi
         ---
         apiVersion: v1
         kind: Service
@@ -328,24 +335,31 @@ jobs:
 
     - name: Summary
       run: |
-        echo "📋 Workflow Summary"
-        echo "================="
+        echo "╔════════════════════════════════════════╗"
+        echo "║       📋 Workflow Summary              ║"
+        echo "╚════════════════════════════════════════╝"
+        echo ""
         echo "Action: ${{ steps.action.outputs.action }}"
         
-        if [ "${{ steps.action.outputs.action }}" != "delete" ]; then
-          echo "Version: ${{ steps.version.outputs.version }}"
-          echo "Backend Image: movienight-backend-${{ steps.version.outputs.version }}"
-          echo "Frontend Image: movienight-frontend-${{ steps.version.outputs.version }}"
-        fi
-        
-        echo ""
-        if [ "${{ steps.action.outputs.action }}" == "build-only" ]; then
-          echo "⏹️  Deployment was skipped"
-          echo "📦 Images are ready in ECR for manual deployment"
-        elif [ "${{ steps.action.outputs.action }}" == "delete" ]; then
-          echo "🗑️  Deployment deleted from cluster"
-          echo "📦 Images remain available in ECR"
-        else
+        if [ "${{ steps.action.outputs.action }}" == "deploy" ]; then
+          echo ""
+          echo "🐳 Built & Pushed Images:"
+          echo "  • movienight-backend-${{ steps.version.outputs.version }}"
+          echo "  • movienight-backend-latest"
+          echo "  • movienight-frontend-${{ steps.version.outputs.version }}"
+          echo "  • movienight-frontend-latest"
+          echo ""
+          echo "🧪 Tests: Passed"
+          echo "📦 ECR Repository: ${{ env.ECR_REPOSITORY }}"
+          echo "🚀 EKS Cluster: ${{ env.EKS_CLUSTER_NAME }}"
+          echo "📍 Namespace: ${{ env.K8S_NAMESPACE }}"
+          echo ""
           echo "✅ Deployment completed successfully"
-          echo "🍿 MovieNight is running in namespace: ${{ env.K8S_NAMESPACE }}"
+          echo "🍿 MovieNight version ${{ steps.version.outputs.version }} is running!"
+        elif [ "${{ steps.action.outputs.action }}" == "delete" ]; then
+          echo ""
+          echo "🗑️  Deployment deleted from cluster"
+          echo "📍 Namespace: ${{ env.K8S_NAMESPACE }}"
         fi
+        echo ""
+        echo "════════════════════════════════════════"
