@@ -10,14 +10,14 @@ on:
   workflow_dispatch:
     inputs:
       deployment_action:
-        description: 'Deployment action'
+        description: 'What do you want to do?'
         required: true
         type: choice
         options:
-          - deploy
-          - build-only
-          - delete
-        default: 'deploy'
+          - 'Build images + Deploy to cluster'
+          - 'Build images only (no deployment)'
+          - 'Delete deployment from cluster'
+        default: 'Build images + Deploy to cluster'
 
 env:
   AWS_REGION: us-east-1
@@ -55,11 +55,30 @@ jobs:
       id: action
       run: |
         if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-          echo "action=${{ github.event.inputs.deployment_action }}" >> $GITHUB_OUTPUT
+          INPUT_ACTION="${{ github.event.inputs.deployment_action }}"
+          
+          # Map descriptive names to simple action codes
+          case "$INPUT_ACTION" in
+            "Build images + Deploy to cluster")
+              ACTION="deploy"
+              ;;
+            "Build images only (no deployment)")
+              ACTION="build-only"
+              ;;
+            "Delete deployment from cluster")
+              ACTION="delete"
+              ;;
+            *)
+              ACTION="deploy"
+              ;;
+          esac
+          
+          echo "action=${ACTION}" >> $GITHUB_OUTPUT
+          echo "📋 Selected action: $INPUT_ACTION"
         else
           echo "action=deploy" >> $GITHUB_OUTPUT
+          echo "📋 Auto-deploy on push to main"
         fi
-        echo "Action: ${{ github.event.inputs.deployment_action || 'deploy' }}"
 
     - name: Get AWS Account ID
       if: steps.action.outputs.action != 'delete'
