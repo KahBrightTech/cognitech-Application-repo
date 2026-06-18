@@ -81,6 +81,42 @@ jobs:
       run: |
         echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
 
+    - name: Set up Node.js
+      if: steps.action.outputs.action == 'deploy'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: |
+          MovieNight/backend/package-lock.json
+          MovieNight/frontend/package-lock.json
+
+    - name: Install backend dependencies
+      if: steps.action.outputs.action == 'deploy'
+      working-directory: ./MovieNight/backend
+      run: npm ci
+
+    - name: Install frontend dependencies
+      if: steps.action.outputs.action == 'deploy'
+      working-directory: ./MovieNight/frontend
+      run: npm ci
+
+    - name: Run backend tests
+      if: steps.action.outputs.action == 'deploy'
+      working-directory: ./MovieNight/backend
+      run: |
+        echo "🧪 Running backend tests..."
+        npm run test:ci
+        echo "✅ Backend tests passed"
+
+    - name: Run frontend tests
+      if: steps.action.outputs.action == 'deploy'
+      working-directory: ./MovieNight/frontend
+      run: |
+        echo "🧪 Running frontend tests..."
+        npm test
+        echo "✅ Frontend tests passed"
+
     - name: Set up Docker Buildx
       if: steps.action.outputs.action == 'deploy'
       uses: docker/setup-buildx-action@v3
@@ -136,21 +172,6 @@ jobs:
         docker tag ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-${{ steps.version.outputs.version }} \
           ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-latest
         echo "✅ Frontend image built"
-
-    - name: Run backend tests
-      if: steps.action.outputs.action == 'deploy'
-      run: |
-        echo "🧪 Running backend tests..."
-        docker run --rm \
-          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-${{ steps.version.outputs.version }} \
-          python -m pytest --version || echo "✅ Backend container validated (no tests configured yet)"
-
-    - name: Run frontend tests
-      if: steps.action.outputs.action == 'deploy'
-      run: |
-        echo "🧪 Running frontend tests..."
-        # Add frontend tests here when available
-        echo "✅ Frontend container validated (no tests configured yet)"
 
     - name: Push backend image to ECR
       if: steps.action.outputs.action == 'deploy'
