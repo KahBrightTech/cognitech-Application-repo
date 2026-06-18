@@ -1,0 +1,188 @@
+# Default values for movienight
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Global settings
+global:
+  namespace: movienight
+  environment: production
+
+# Image settings
+image:
+  registry: 271457809232.dkr.ecr.us-east-1.amazonaws.com
+  repository: int-production-use1-ecs
+  pullPolicy: Always
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: latest
+
+# Backend configuration
+backend:
+  name: backend
+  replicaCount: 3
+  
+  image:
+    name: movienight-backend
+  
+  service:
+    type: ClusterIP
+    port: 3001
+    targetPort: 3001
+    sessionAffinity: ClientIP
+    sessionAffinityConfig:
+      clientIP:
+        timeoutSeconds: 10800
+  
+  env:
+    NODE_ENV: production
+    PORT: "3001"
+    CORS_ORIGIN: "https://movienight.example.com"  # Update with your domain
+  
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 3001
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 3001
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+# Frontend configuration
+frontend:
+  name: frontend
+  replicaCount: 2
+  
+  image:
+    name: movienight-frontend
+  
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+  
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 80
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 80
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/success-codes: "200,101"
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=4000
+    # Uncomment and add your ACM certificate ARN for HTTPS
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789012:certificate/xxxxx
+    # alb.ingress.kubernetes.io/ssl-redirect: '443'
+  
+  hosts:
+    - host: movienight.example.com  # Update with your domain
+      paths:
+        - path: /api
+          pathType: Prefix
+          backend:
+            service: backend
+            port: 3001
+        - path: /socket.io
+          pathType: Prefix
+          backend:
+            service: backend
+            port: 3001
+        - path: /
+          pathType: Prefix
+          backend:
+            service: frontend
+            port: 80
+
+# Secrets
+secrets:
+  # TMDB API key - will be provided via Helm values or Kubernetes secret
+  tmdbApiKey: ""  # Set via --set secrets.tmdbApiKey=xxx or use existing secret
+
+# ConfigMap data
+configMap:
+  create: true
+
+# Labels
+labels:
+  app: movienight
+  managed-by: helm
+
+# Pod annotations
+podAnnotations: {}
+
+# Security context
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}

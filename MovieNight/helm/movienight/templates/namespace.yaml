@@ -1,0 +1,6 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "movienight.namespace" . }}
+  labels:
+    {{- include "movienight.labels" . | nindent 4 }}

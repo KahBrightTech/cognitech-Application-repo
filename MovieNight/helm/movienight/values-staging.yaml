@@ -1,0 +1,60 @@
+# Staging environment values
+global:
+  namespace: movienight-staging
+  environment: staging
+
+backend:
+  replicaCount: 2
+  
+  env:
+    NODE_ENV: staging
+    CORS_ORIGIN: "https://movienight-staging.example.com"
+  
+  resources:
+    requests:
+      memory: "192Mi"
+      cpu: "150m"
+    limits:
+      memory: "384Mi"
+      cpu: "300m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+
+frontend:
+  replicaCount: 1
+  
+  resources:
+    requests:
+      memory: "96Mi"
+      cpu: "75m"
+    limits:
+      memory: "192Mi"
+      cpu: "150m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 3
+
+ingress:
+  hosts:
+    - host: movienight-staging.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          backend:
+            service: backend
+            port: 3001
+        - path: /socket.io
+          pathType: Prefix
+          backend:
+            service: backend
+            port: 3001
+        - path: /
+          pathType: Prefix
+          backend:
+            service: frontend
+            port: 80

@@ -1,0 +1,14 @@
+apiVersion: v2
+name: movienight
+description: A Helm chart for MovieNight - Group Movie Matcher Application
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - movienight
+  - movie
+  - social
+  - entertainment
+home: https://github.com/KahBrightTech/cognitech-Application-repo
+maintainers:
+  - name: MovieNight Team

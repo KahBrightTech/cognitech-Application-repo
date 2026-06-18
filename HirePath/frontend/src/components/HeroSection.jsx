@@ -160,7 +160,7 @@ export default function HeroSection({ onUpload, error }) {
       </section>
 
       {/* ──────────────────────────── UPLOAD ──────────────────────────── */}
-      <section className="bg-gradient-to-b from-slate-50 to-white py-16 px-4">
+      <section id="upload" className="bg-gradient-to-b from-slate-50 to-white py-16 px-4">
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-extrabold text-slate-800 mb-2">Get Started Now</h2>
@@ -262,7 +262,7 @@ export default function HeroSection({ onUpload, error }) {
       </section>
 
       {/* ──────────────────────────── HOW IT WORKS ──────────────────────────── */}
-      <section className="bg-white py-20 px-4">
+      <section id="how-it-works" className="bg-white py-20 px-4">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-14">
             <div className="inline-flex items-center gap-2 bg-violet-50 border border-violet-200 text-violet-700 rounded-full px-4 py-1.5 text-sm font-semibold mb-4">

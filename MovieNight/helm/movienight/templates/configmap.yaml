@@ -1,0 +1,13 @@
+{{- if .Values.configMap.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "movienight.fullname" . }}-config
+  namespace: {{ include "movienight.namespace" . }}
+  labels:
+    {{- include "movienight.labels" . | nindent 4 }}
+data:
+  NODE_ENV: {{ .Values.backend.env.NODE_ENV | quote }}
+  PORT: {{ .Values.backend.env.PORT | quote }}
+  CORS_ORIGIN: {{ .Values.backend.env.CORS_ORIGIN | quote }}
+{{- end }}

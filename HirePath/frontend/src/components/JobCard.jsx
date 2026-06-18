@@ -17,7 +17,26 @@ const MATCH_LABEL = (pct) => {
   return { label: 'Partial Match',  cls: 'text-red-600 bg-red-50 border-red-200' }
 }
 
-/** Derive a stable hex color from a company name */
+/** Build a real job-board search URL for each source */
+const buildJobUrl = (source, title, company) => {
+  const q = encodeURIComponent(`${title} ${company}`)
+  switch (source) {
+    case 'LinkedIn':
+      return `https://www.linkedin.com/jobs/search/?keywords=${q}&f_C=`
+    case 'Indeed':
+      return `https://www.indeed.com/jobs?q=${q}`
+    case 'Glassdoor':
+      return `https://www.glassdoor.com/Job/jobs.htm?sc.keyword=${q}`
+    case 'Monster':
+      return `https://www.monster.com/jobs/search?q=${q}`
+    case 'ZipRecruiter':
+      return `https://www.ziprecruiter.com/jobs-search?search=${q}`
+    default:
+      return `https://www.google.com/search?q=${q}+jobs`
+  }
+}
+
+/** Stable color from company name */
 const getCompanyBg = (name) => {
   const palette = [
     '4f46e5', '0891b2', '059669', 'd97706', 'dc2626',
@@ -32,6 +51,7 @@ export default function JobCard({ job, index }) {
   const { label, cls } = MATCH_LABEL(job.match_percentage)
   const bg = getCompanyBg(job.company)
   const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(job.company)}&background=${bg}&color=fff&size=64&bold=true&rounded=true`
+  const jobUrl = buildJobUrl(job.source, job.title, job.company)
 
   return (
     <div
@@ -46,7 +66,6 @@ export default function JobCard({ job, index }) {
 
         {/* Header */}
         <div className="flex items-start gap-3">
-          {/* Company avatar via UI Avatars */}
           <img
             src={avatarUrl}
             alt={job.company}
@@ -55,13 +74,11 @@ export default function JobCard({ job, index }) {
             className="w-11 h-11 rounded-xl flex-shrink-0 shadow-sm object-cover"
             onError={(e) => {
               e.currentTarget.style.display = 'none'
-              e.currentTarget.nextSibling?.style && (e.currentTarget.nextSibling.style.display = 'flex')
+              if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'flex'
             }}
           />
-          {/* Fallback avatar */}
-          <div
-            className="w-11 h-11 rounded-xl animated-bg items-center justify-center flex-shrink-0 shadow-sm hidden"
-          >
+          {/* Fallback */}
+          <div className="w-11 h-11 rounded-xl animated-bg items-center justify-center flex-shrink-0 shadow-sm hidden">
             <span className="text-white font-bold text-sm">{job.company.charAt(0)}</span>
           </div>
 
@@ -129,10 +146,15 @@ export default function JobCard({ job, index }) {
           <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${SOURCE_STYLES[job.source] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
             {job.source}
           </span>
-          <button className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:text-violet-800 transition-colors group/btn">
+          <a
+            href={jobUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-xs font-semibold text-violet-600 hover:text-violet-800 transition-colors group/btn"
+          >
             View Job
             <ExternalLink className="w-3.5 h-3.5 group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5 transition-transform" />
-          </button>
+          </a>
         </div>
       </div>
     </div>

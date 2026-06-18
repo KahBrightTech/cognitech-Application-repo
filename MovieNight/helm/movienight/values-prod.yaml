@@ -1,0 +1,75 @@
+# Production environment values
+global:
+  namespace: movienight
+  environment: production
+
+# Use production image tags
+image:
+  tag: latest  # Will be overridden in CI/CD with commit SHA
+
+backend:
+  replicaCount: 3
+  
+  env:
+    NODE_ENV: production
+    CORS_ORIGIN: "https://movienight.example.com"
+  
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+frontend:
+  replicaCount: 2
+  
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+ingress:
+  annotations:
+    # Add production-specific annotations
+    alb.ingress.kubernetes.io/shield-advanced-protection: "false"
+    # Uncomment for HTTPS redirect in production
+    # alb.ingress.kubernetes.io/ssl-redirect: '443'
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:271457809232:certificate/xxxxx
+  
+  hosts:
+    - host: movienight.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          backend:
+            service: backend
+            port: 3001
+        - path: /socket.io
+          pathType: Prefix
+          backend:
+            service: backend
+            port: 3001
+        - path: /
+          pathType: Prefix
+          backend:
+            service: frontend
+            port: 80

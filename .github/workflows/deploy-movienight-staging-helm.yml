@@ -1,0 +1,114 @@
+name: Deploy MovieNight to Staging (Helm)
+
+on:
+  push:
+    branches:
+      - staging
+    paths:
+      - 'MovieNight/**'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: int-production-use1-ecs
+  EKS_CLUSTER_NAME: your-staging-eks-cluster  # Update this
+  IAM_ROLE: arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role
+  ENVIRONMENT: staging
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy to Staging
+    runs-on: ubuntu-latest
+    environment: staging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ env.IAM_ROLE }}
+        role-session-name: GitHubActions-MovieNight-Staging-${{ github.run_id }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Get AWS Account ID
+      id: account-id
+      run: |
+        echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./MovieNight/backend
+        push: true
+        tags: |
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-staging-${{ github.sha }}
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-staging-latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push frontend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./MovieNight/frontend
+        push: true
+        tags: |
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-staging-${{ github.sha }}
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-staging-latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+    - name: Deploy with Helm
+      run: |
+        helm upgrade --install movienight ./MovieNight/helm/movienight \
+          --namespace movienight-staging \
+          --create-namespace \
+          --values ./MovieNight/helm/movienight/values-staging.yaml \
+          --set backend.image.tag=movienight-backend-staging-${{ github.sha }} \
+          --set frontend.image.tag=movienight-frontend-staging-${{ github.sha }} \
+          --set secrets.tmdbApiKey=${{ secrets.TMDB_API_KEY }} \
+          --wait \
+          --timeout 10m \
+          --debug
+
+    - name: Get deployment status
+      run: |
+        echo "=== Helm Release ==="
+        helm list -n movienight-staging
+        echo ""
+        echo "=== Pods ==="
+        kubectl get pods -n movienight-staging
+        echo ""
+        echo "=== Services ==="
+        kubectl get svc -n movienight-staging
+        echo ""
+        echo "=== Ingress ==="
+        kubectl get ingress -n movienight-staging
+
+    - name: Get ALB URL
+      run: |
+        ALB_URL=$(kubectl get ingress movienight-ingress -n movienight-staging -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
+        echo "🍿 MovieNight Staging deployed!"
+        echo "🔗 Access URL: http://${ALB_URL}"
+        echo "📊 Release: $(helm list -n movienight-staging -o json | jq -r '.[0].chart')"
