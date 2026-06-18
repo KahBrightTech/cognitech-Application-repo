@@ -51,12 +51,24 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
+    - name: Determine action
+      id: action
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "action=${{ github.event.inputs.deployment_action }}" >> $GITHUB_OUTPUT
+        else
+          echo "action=deploy" >> $GITHUB_OUTPUT
+        fi
+        echo "Action: ${{ github.event.inputs.deployment_action || 'deploy' }}"
+
     - name: Get AWS Account ID
+      if: steps.action.outputs.action != 'delete'
       id: account-id
       run: |
         echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
 
     - name: Get latest version from ECR and auto-increment
+      if: steps.action.outputs.action != 'delete'
       id: version
       run: |
         echo "🔍 Checking latest version in ECR..."
@@ -86,9 +98,11 @@ jobs:
         echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
 
     - name: Set up Docker Buildx
+      if: steps.action.outputs.action != 'delete'
       uses: docker/setup-buildx-action@v3
 
     - name: Build and push backend image
+      if: steps.action.outputs.action != 'delete'
       uses: docker/build-push-action@v5
       with:
         context: ./MovieNight/backend
@@ -100,6 +114,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build and push frontend image
+      if: steps.action.outputs.action != 'delete'
       uses: docker/build-push-action@v5
       with:
         context: ./MovieNight/frontend
@@ -110,38 +125,28 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Deployment Decision
-      id: deploy-decision
+    - name: Build Summary
+      if: steps.action.outputs.action != 'delete'
       run: |
         echo "🎯 Version ${{ steps.version.outputs.version }} built and pushed to ECR"
         echo ""
         
-        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-          DEPLOY_ACTION="${{ github.event.inputs.deployment_action }}"
-        else
-          DEPLOY_ACTION="deploy"
-        fi
-        
-        echo "action=${DEPLOY_ACTION}" >> $GITHUB_OUTPUT
-        
-        if [ "$DEPLOY_ACTION" == "build-only" ]; then
+        if [ "${{ steps.action.outputs.action }}" == "build-only" ]; then
           echo "⏹️  Deployment skipped - build only"
           echo "📦 Images available in ECR:"
           echo "   - movienight-backend-${{ steps.version.outputs.version }}"
           echo "   - movienight-frontend-${{ steps.version.outputs.version }}"
-        elif [ "$DEPLOY_ACTION" == "delete" ]; then
-          echo "🗑️  Will delete deployment from cluster"
         else
           echo "✅ Proceeding with deployment"
         fi
 
     - name: Update kubeconfig
-      if: steps.deploy-decision.outputs.action == 'deploy' || steps.deploy-decision.outputs.action == 'delete'
+      if: steps.action.outputs.action == 'deploy' || steps.action.outputs.action == 'delete'
       run: |
         aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
     - name: Delete deployment
-      if: steps.deploy-decision.outputs.action == 'delete'
+      if: steps.action.outputs.action == 'delete'
       run: |
         echo "🗑️  Deleting MovieNight deployment..."
         
@@ -158,12 +163,12 @@ jobs:
         kubectl get all -n ${{ env.K8S_NAMESPACE }} || echo "No resources found"
 
     - name: Create namespace if not exists
-      if: steps.deploy-decision.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy'
       run: |
         kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Create secrets
-      if: steps.deploy-decision.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy'
       run: |
         kubectl create secret generic movienight-secrets \
           --from-literal=tmdb-api-key=${{ secrets.TMDB_API_KEY }} \
@@ -171,7 +176,7 @@ jobs:
           --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Deploy backend
-      if: steps.deploy-decision.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy'
       run: |
         cat <<EOF | kubectl apply -f -
         apiVersion: apps/v1
@@ -231,7 +236,7 @@ jobs:
         EOF
 
     - name: Deploy frontend
-      if: steps.deploy-decision.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy'
       run: |
         cat <<EOF | kubectl apply -f -
         apiVersion: apps/v1
@@ -285,13 +290,13 @@ jobs:
         EOF
 
     - name: Wait for deployment rollout
-      if: steps.deploy-decision.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy'
       run: |
         kubectl rollout status deployment/movienight-backend -n ${{ env.K8S_NAMESPACE }} --timeout=5m
         kubectl rollout status deployment/movienight-frontend -n ${{ env.K8S_NAMESPACE }} --timeout=5m
 
     - name: Verify deployment
-      if: steps.deploy-decision.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy'
       run: |
         echo "=== Deployments ==="
         kubectl get deployments -n ${{ env.K8S_NAMESPACE }}
@@ -304,17 +309,21 @@ jobs:
 
     - name: Summary
       run: |
-        echo "📋 Build Summary"
+        echo "📋 Workflow Summary"
         echo "================="
-        echo "Version: ${{ steps.version.outputs.version }}"
-        echo "Action: ${{ steps.deploy-decision.outputs.action }}"
-        echo "Backend Image: movienight-backend-${{ steps.version.outputs.version }}"
-        echo "Frontend Image: movienight-frontend-${{ steps.version.outputs.version }}"
+        echo "Action: ${{ steps.action.outputs.action }}"
+        
+        if [ "${{ steps.action.outputs.action }}" != "delete" ]; then
+          echo "Version: ${{ steps.version.outputs.version }}"
+          echo "Backend Image: movienight-backend-${{ steps.version.outputs.version }}"
+          echo "Frontend Image: movienight-frontend-${{ steps.version.outputs.version }}"
+        fi
+        
         echo ""
-        if [ "${{ steps.deploy-decision.outputs.action }}" == "build-only" ]; then
+        if [ "${{ steps.action.outputs.action }}" == "build-only" ]; then
           echo "⏹️  Deployment was skipped"
           echo "📦 Images are ready in ECR for manual deployment"
-        elif [ "${{ steps.deploy-decision.outputs.action }}" == "delete" ]; then
+        elif [ "${{ steps.action.outputs.action }}" == "delete" ]; then
           echo "🗑️  Deployment deleted from cluster"
           echo "📦 Images remain available in ECR"
         else
