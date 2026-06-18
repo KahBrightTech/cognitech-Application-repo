@@ -16,6 +16,7 @@ on:
         options:
           - deploy
           - build-only
+          - delete
         default: 'deploy'
 
 env:
@@ -128,14 +129,33 @@ jobs:
           echo "📦 Images available in ECR:"
           echo "   - movienight-backend-${{ steps.version.outputs.version }}"
           echo "   - movienight-frontend-${{ steps.version.outputs.version }}"
+        elif [ "$DEPLOY_ACTION" == "delete" ]; then
+          echo "🗑️  Will delete deployment from cluster"
         else
           echo "✅ Proceeding with deployment"
         fi
 
     - name: Update kubeconfig
-      if: steps.deploy-decision.outputs.action == 'deploy'
+      if: steps.deploy-decision.outputs.action == 'deploy' || steps.deploy-decision.outputs.action == 'delete'
       run: |
         aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+    - name: Delete deployment
+      if: steps.deploy-decision.outputs.action == 'delete'
+      run: |
+        echo "🗑️  Deleting MovieNight deployment..."
+        
+        # Delete all resources in the namespace
+        kubectl delete deployment movienight-backend -n ${{ env.K8S_NAMESPACE }} --ignore-not-found=true
+        kubectl delete deployment movienight-frontend -n ${{ env.K8S_NAMESPACE }} --ignore-not-found=true
+        kubectl delete service movienight-backend -n ${{ env.K8S_NAMESPACE }} --ignore-not-found=true
+        kubectl delete service movienight-frontend -n ${{ env.K8S_NAMESPACE }} --ignore-not-found=true
+        kubectl delete secret movienight-secrets -n ${{ env.K8S_NAMESPACE }} --ignore-not-found=true
+        
+        echo "✅ Deployment deleted successfully"
+        echo ""
+        echo "Remaining resources in namespace:"
+        kubectl get all -n ${{ env.K8S_NAMESPACE }} || echo "No resources found"
 
     - name: Create namespace if not exists
       if: steps.deploy-decision.outputs.action == 'deploy'
@@ -164,7 +184,7 @@ jobs:
             component: backend
             version: ${{ steps.version.outputs.version }}
         spec:
-          replicas: 2
+          replicas: 1
           selector:
             matchLabels:
               app: movienight
@@ -224,7 +244,7 @@ jobs:
             component: frontend
             version: ${{ steps.version.outputs.version }}
         spec:
-          replicas: 2
+          replicas: 1
           selector:
             matchLabels:
               app: movienight
@@ -294,6 +314,9 @@ jobs:
         if [ "${{ steps.deploy-decision.outputs.action }}" == "build-only" ]; then
           echo "⏹️  Deployment was skipped"
           echo "📦 Images are ready in ECR for manual deployment"
+        elif [ "${{ steps.deploy-decision.outputs.action }}" == "delete" ]; then
+          echo "🗑️  Deployment deleted from cluster"
+          echo "📦 Images remain available in ECR"
         else
           echo "✅ Deployment completed successfully"
           echo "🍿 MovieNight is running in namespace: ${{ env.K8S_NAMESPACE }}"

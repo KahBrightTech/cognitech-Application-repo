@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'MovieNight/**'
+      - 'Test/**'
       - '.github/workflows/movienight-prod.yml'
   workflow_dispatch:
     inputs:
