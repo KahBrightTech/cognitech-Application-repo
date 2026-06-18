@@ -6,6 +6,7 @@ on:
       - staging
     paths:
       - 'MovieNight/**'
+      - '.github/workflows/deploy-movienight-staging-helm.yml'
   workflow_dispatch:
 
 env:
@@ -45,6 +46,35 @@ jobs:
       run: |
         echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_OUTPUT
 
+    - name: Get latest staging version and auto-increment
+      id: version
+      run: |
+        echo "🔍 Checking latest staging version in ECR..."
+        
+        # Get all staging version tags
+        VERSIONS=$(aws ecr describe-images \
+          --repository-name ${{ env.ECR_REPOSITORY }} \
+          --region ${{ env.AWS_REGION }} \
+          --query 'imageDetails[*].imageTags[]' \
+          --output text | tr '\t' '\n' | grep -E '^movienight-backend-staging-v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/movienight-backend-staging-v//' || echo "")
+        
+        if [ -z "$VERSIONS" ]; then
+          NEW_VERSION="v1.0.0"
+          echo "📌 No previous staging versions. Starting with ${NEW_VERSION}"
+        else
+          LATEST_VERSION=$(echo "$VERSIONS" | sort -V | tail -n 1)
+          echo "📌 Latest staging version: v${LATEST_VERSION}"
+          
+          MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
+          MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
+          PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="v${MAJOR}.${MINOR}.${NEW_PATCH}"
+          echo "🚀 Auto-incrementing to: ${NEW_VERSION}"
+        fi
+        
+        echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
@@ -54,7 +84,7 @@ jobs:
         context: ./MovieNight/backend
         push: true
         tags: |
-          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-staging-${{ github.sha }}
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-staging-${{ steps.version.outputs.version }}
           ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-backend-staging-latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -65,7 +95,7 @@ jobs:
         context: ./MovieNight/frontend
         push: true
         tags: |
-          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-staging-${{ github.sha }}
+          ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-staging-${{ steps.version.outputs.version }}
           ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-staging-latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
@@ -85,8 +115,8 @@ jobs:
           --namespace movienight-staging \
           --create-namespace \
           --values ./MovieNight/helm/movienight/values-staging.yaml \
-          --set backend.image.tag=movienight-backend-staging-${{ github.sha }} \
-          --set frontend.image.tag=movienight-frontend-staging-${{ github.sha }} \
+          --set backend.image.tag=movienight-backend-staging-${{ steps.version.outputs.version }} \
+          --set frontend.image.tag=movienight-frontend-staging-${{ steps.version.outputs.version }} \
           --set secrets.tmdbApiKey=${{ secrets.TMDB_API_KEY }} \
           --wait \
           --timeout 10m \
@@ -112,3 +142,4 @@ jobs:
         echo "🍿 MovieNight Staging deployed!"
         echo "🔗 Access URL: http://${ALB_URL}"
         echo "📊 Release: $(helm list -n movienight-staging -o json | jq -r '.[0].chart')"
+        echo "🏷️  Version: ${{ steps.version.outputs.version }}"
