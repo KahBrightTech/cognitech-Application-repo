@@ -24,6 +24,13 @@ spec:
         sleep 3
       done
       echo "✅ backend is up - starting frontend"
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 50m
+        memory: 32Mi
   containers:
   - name: frontend
     # Image is templated: __REGISTRY__ and __VERSION__ are injected by the
