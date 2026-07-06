@@ -1,0 +1,62 @@
+# Default values for the PulseBoard chart.
+# Override at deploy time (e.g. via --set or a values-<env>.yaml file).
+
+global:
+  # Namespace to deploy into. Overridden by the workflow's namespace input.
+  namespace: pulseboard
+
+image:
+  # Full ECR registry host + repository. Both components share this repo and
+  # are distinguished by their image tag (see backend.image.tag / frontend.image.tag).
+  registry: 271457809232.dkr.ecr.us-east-1.amazonaws.com
+  repository: int-production-use1-ecs
+  pullPolicy: Always
+
+backend:
+  name: pulseboard-backend
+  replicaCount: 1
+  image:
+    # Full tag within the shared repo, e.g. pulseboard-backend-v1.0.2
+    tag: pulseboard-backend-latest
+  service:
+    type: ClusterIP
+    port: 4000
+  env:
+    PORT: "4000"
+    CORS_ORIGIN: "*"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+frontend:
+  name: pulseboard-frontend
+  replicaCount: 1
+  image:
+    tag: pulseboard-frontend-latest
+  service:
+    type: NodePort # ClusterIP | NodePort | LoadBalancer
+    port: 80
+    nodePort: 30080 # used only when service.type == NodePort
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+  # initContainer that blocks nginx until the backend /health responds, so the
+  # frontend never starts before the backend (and won't crash on DNS lookup).
+  waitForBackend:
+    enabled: true
+    image: busybox:1.36
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 50m
+        memory: 32Mi

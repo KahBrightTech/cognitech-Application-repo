@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "pulseboard.labels" . | nindent 4 }}
+    component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      app: pulseboard
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: pulseboard
+        component: frontend
+    spec:
+      {{- if .Values.frontend.waitForBackend.enabled }}
+      initContainers:
+        - name: wait-for-backend
+          image: {{ .Values.frontend.waitForBackend.image }}
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for backend to become ready..."
+              until wget -qO- http://{{ .Values.backend.name }}:{{ .Values.backend.service.port }}/health >/dev/null 2>&1; do
+                echo "  backend not ready yet, retrying in 3s..."
+                sleep 3
+              done
+              echo "backend is up - starting frontend"
+          resources:
+            {{- toYaml .Values.frontend.waitForBackend.resources | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: frontend
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
