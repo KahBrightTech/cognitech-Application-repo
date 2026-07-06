@@ -384,7 +384,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Scan dependencies with Trivy (filesystem)
         if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: 'fs'
           scan-ref: ${{ matrix.context }}
@@ -423,7 +423,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Scan image with Trivy
         if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ steps.version.outputs.image_tag }}
           format: 'sarif'
