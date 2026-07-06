@@ -37,6 +37,26 @@ on:
         required: true
         type: string
         default: 'latest'
+      include_backend:
+        description: 'Deploy the backend component'
+        required: false
+        type: boolean
+        default: true
+      backend_tag:
+        description: 'Explicit backend image tag (empty = derive <app>-backend-<version>)'
+        required: false
+        type: string
+        default: ''
+      include_frontend:
+        description: 'Deploy the frontend component'
+        required: false
+        type: boolean
+        default: true
+      frontend_tag:
+        description: 'Explicit frontend image tag (empty = derive <app>-frontend-<version>)'
+        required: false
+        type: string
+        default: ''
       values_file:
         description: 'Optional values file (relative to repo root). Empty = chart defaults.'
         required: false
@@ -100,8 +120,8 @@ jobs:
       - name: Verify images exist in ECR
         if: inputs.action == 'deploy'
         run: |
-          for COMPONENT in backend frontend; do
-            TAG="${{ inputs.app_name }}-${COMPONENT}-${{ inputs.version }}"
+          check() {
+            local TAG="$1"
             echo "🔍 Checking for tag: $TAG"
             aws ecr describe-images \
               --repository-name "${{ env.ECR_REPOSITORY }}" \
@@ -109,7 +129,15 @@ jobs:
               --image-ids imageTag="$TAG" >/dev/null 2>&1 \
               && echo "   ✅ Found $TAG" \
               || { echo "   ❌ $TAG not found in ECR. Build it first."; exit 1; }
-          done
+          }
+          if [ "${{ inputs.include_backend }}" == "true" ]; then
+            BT="${{ inputs.backend_tag }}"; [ -z "$BT" ] && BT="${{ inputs.app_name }}-backend-${{ inputs.version }}"
+            check "$BT"
+          fi
+          if [ "${{ inputs.include_frontend }}" == "true" ]; then
+            FT="${{ inputs.frontend_tag }}"; [ -z "$FT" ] && FT="${{ inputs.app_name }}-frontend-${{ inputs.version }}"
+            check "$FT"
+          fi
 
       # ----------------------------------------------------------------
       # Deploy (helm upgrade --install)
@@ -122,14 +150,27 @@ jobs:
           if [ "${{ inputs.dry_run }}" == "true" ]; then EXTRA="--dry-run --debug"; echo "🧪 DRY RUN"; fi
           if [ -n "${{ inputs.values_file }}" ]; then EXTRA="$EXTRA --values ${{ inputs.values_file }}"; fi
 
+          # Only set the image tag for components that apply. Each tag can be
+          # provided explicitly, or derived as <app>-<component>-<version>.
+          SETS=""
+          if [ "${{ inputs.include_backend }}" == "true" ]; then
+            BT="${{ inputs.backend_tag }}"; [ -z "$BT" ] && BT="${{ inputs.app_name }}-backend-${{ inputs.version }}"
+            echo "🧩 backend image tag: $BT"
+            SETS="$SETS --set backend.image.tag=$BT"
+          fi
+          if [ "${{ inputs.include_frontend }}" == "true" ]; then
+            FT="${{ inputs.frontend_tag }}"; [ -z "$FT" ] && FT="${{ inputs.app_name }}-frontend-${{ inputs.version }}"
+            echo "🧩 frontend image tag: $FT"
+            SETS="$SETS --set frontend.image.tag=$FT"
+          fi
+
           helm upgrade --install "${{ inputs.release_name }}" "${{ inputs.chart_path }}" \
             --namespace "${{ inputs.namespace }}" \
             --create-namespace \
             --set global.namespace=${{ inputs.namespace }} \
             --set image.registry=${{ env.IMAGE_REGISTRY }} \
             --set image.repository=${{ env.ECR_REPOSITORY }} \
-            --set backend.image.tag=${{ inputs.app_name }}-backend-${{ inputs.version }} \
-            --set frontend.image.tag=${{ inputs.app_name }}-frontend-${{ inputs.version }} \
+            $SETS \
             --wait \
             --timeout 10m \
             --atomic \
