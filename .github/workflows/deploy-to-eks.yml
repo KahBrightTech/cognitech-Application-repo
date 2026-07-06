@@ -1,0 +1,234 @@
+name: Deploy to EKS
+
+# =============================================================================
+# Generic, reusable deploy-to-EKS workflow. Works for ANY app that keeps its
+# Kubernetes manifests in a folder. It renders the manifests (injecting the
+# chosen image version + namespace) and applies them to the cluster.
+#
+# It does NOT build images - it deploys a version already in ECR.
+# Pod/Deployment ordering (e.g. backend before frontend) should be handled
+# inside the manifests via initContainers or readiness probes.
+#
+# Run it two ways:
+#   1. Manually (Actions -> Deploy to EKS -> Run workflow), or
+#   2. From another workflow via `uses: ./.github/workflows/deploy-to-eks.yml`.
+# =============================================================================
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        description: 'App name / image tag prefix, e.g. pulseboard'
+        required: true
+        type: string
+      manifests_path:
+        description: 'Folder containing the k8s manifests, e.g. PulseBoard/k8s'
+        required: true
+        type: string
+      namespace:
+        description: 'Target namespace (must already exist)'
+        required: true
+        type: string
+      version:
+        description: 'Image version to deploy (e.g. v1.0.3) or "latest"'
+        required: false
+        type: string
+        default: 'latest'
+      image_registry:
+        description: 'Full ECR image path (registry/repo), injected as __REGISTRY__'
+        required: false
+        type: string
+        default: '271457809232.dkr.ecr.us-east-1.amazonaws.com/int-production-use1-ecs'
+      components:
+        description: 'Comma-separated components to verify in ECR (e.g. "backend,frontend"). Empty = skip verify.'
+        required: false
+        type: string
+        default: ''
+      action:
+        description: 'deploy or delete'
+        required: false
+        type: string
+        default: 'deploy'
+      aws_region:
+        required: false
+        type: string
+        default: 'us-east-1'
+      ecr_repository:
+        required: false
+        type: string
+        default: 'int-production-use1-ecs'
+      eks_cluster:
+        required: false
+        type: string
+        default: 'int-production-use1-prod-novutech-eks-cluster'
+      iam_role:
+        required: false
+        type: string
+        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
+
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'App name / image tag prefix, e.g. pulseboard'
+        required: true
+        type: string
+        default: 'pulseboard'
+      manifests_path:
+        description: 'Folder containing the k8s manifests, e.g. PulseBoard/k8s'
+        required: true
+        type: string
+        default: 'PulseBoard/k8s'
+      namespace:
+        description: 'Target namespace (must already exist)'
+        required: true
+        type: string
+        default: 'pulseboard'
+      version:
+        description: 'Image version to deploy (e.g. v1.0.3) or "latest"'
+        required: true
+        type: string
+        default: 'latest'
+      image_registry:
+        description: 'Full ECR image path (registry/repo), e.g. <acct>.dkr.ecr.<region>.amazonaws.com/<repo>'
+        required: true
+        type: string
+        default: '271457809232.dkr.ecr.us-east-1.amazonaws.com/int-production-use1-ecs'
+      components:
+        description: 'Comma-separated components to verify in ECR (e.g. "backend,frontend"). Empty = skip verify.'
+        required: false
+        type: string
+        default: 'backend,frontend'
+      action:
+        description: 'Deploy or delete'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - delete
+        default: deploy
+
+env:
+  AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+  ECR_REPOSITORY: ${{ inputs.ecr_repository || 'int-production-use1-ecs' }}
+  EKS_CLUSTER_NAME: ${{ inputs.eks_cluster || 'int-production-use1-prod-novutech-eks-cluster' }}
+  IAM_ROLE: ${{ inputs.iam_role || 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role' }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ inputs.action }} ${{ inputs.app_name }} ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE }}
+          role-session-name: GitHubActions-Deploy-${{ inputs.app_name }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name "${{ env.EKS_CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
+
+      # ----------------------------------------------------------------
+      # Verify requested version exists in ECR (deploy only, if components given)
+      # ----------------------------------------------------------------
+      - name: Verify images exist in ECR
+        if: inputs.action == 'deploy' && inputs.components != ''
+        run: |
+          IFS=',' read -ra COMPS <<< "${{ inputs.components }}"
+          for COMPONENT in "${COMPS[@]}"; do
+            COMPONENT="$(echo "$COMPONENT" | xargs)"   # trim spaces
+            [ -z "$COMPONENT" ] && continue
+            TAG="${{ inputs.app_name }}-${COMPONENT}-${{ inputs.version }}"
+            echo "🔍 Checking for tag: $TAG"
+            aws ecr describe-images \
+              --repository-name "${{ env.ECR_REPOSITORY }}" \
+              --region "${{ env.AWS_REGION }}" \
+              --image-ids imageTag="$TAG" >/dev/null 2>&1 \
+              && echo "   ✅ Found $TAG" \
+              || { echo "   ❌ $TAG not found in ECR. Build it first."; exit 1; }
+          done
+
+      # ----------------------------------------------------------------
+      # Render manifests: inject version + namespace, then apply
+      # ----------------------------------------------------------------
+      - name: Deploy
+        if: inputs.action == 'deploy'
+        run: |
+          set -e
+          NS="${{ inputs.namespace }}"
+          VERSION="${{ inputs.version }}"
+          REGISTRY="${{ inputs.image_registry }}"
+          SRC="${{ inputs.manifests_path }}"
+
+          if [ ! -d "$SRC" ]; then echo "❌ Manifests folder '$SRC' not found."; exit 1; fi
+
+          mkdir -p rendered
+          echo "🧾 Rendering manifests from '$SRC' (registry=$REGISTRY, version=$VERSION, namespace=$NS)..."
+          for f in $(find "$SRC" -type f \( -name '*.yaml' -o -name '*.yml' \) | sort); do
+            # Inject the templated values into every manifest.
+            sed -e "s#__REGISTRY__#${REGISTRY}#g" \
+                -e "s#__VERSION__#${VERSION}#g" \
+                -e "s#__NAMESPACE__#${NS}#g" \
+                "$f" > "rendered/$(basename "$f")"
+          done
+
+          echo "🚀 Applying to namespace '$NS'..."
+          kubectl apply -n "$NS" -f rendered/
+
+          echo "⏳ Waiting for all pods in '$NS' to become Ready..."
+          kubectl wait --for=condition=Ready pod --all -n "$NS" --timeout=300s || {
+            echo "⚠️  Not all pods reported Ready in time. Current state:"; kubectl get pods -n "$NS" -o wide; exit 1;
+          }
+
+      # ----------------------------------------------------------------
+      # Delete
+      # ----------------------------------------------------------------
+      - name: Delete
+        if: inputs.action == 'delete'
+        run: |
+          set -e
+          NS="${{ inputs.namespace }}"
+          VERSION="${{ inputs.version }}"
+          REGISTRY="${{ inputs.image_registry }}"
+          SRC="${{ inputs.manifests_path }}"
+          echo "🗑️  Deleting manifests in '$SRC' from namespace '$NS'..."
+          mkdir -p rendered
+          for f in $(find "$SRC" -type f \( -name '*.yaml' -o -name '*.yml' \) | sort); do
+            sed -e "s#__REGISTRY__#${REGISTRY}#g" \
+                -e "s#__VERSION__#${VERSION}#g" \
+                -e "s#__NAMESPACE__#${NS}#g" \
+                "$f" > "rendered/$(basename "$f")"
+          done
+          kubectl delete -n "$NS" -f rendered/ --ignore-not-found=true
+
+      # ----------------------------------------------------------------
+      # Status + summary
+      # ----------------------------------------------------------------
+      - name: Show status
+        if: always()
+        run: |
+          NS="${{ inputs.namespace }}"
+          echo "=== Pods ==="; kubectl get pods -n "$NS" -o wide || true
+          echo "=== Services ==="; kubectl get svc -n "$NS" || true
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## 🚀 Deploy to EKS: ${{ inputs.app_name }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Action | \`${{ inputs.action }}\` |"
+            echo "| Version | \`${{ inputs.version }}\` |"
+            echo "| Namespace | \`${{ inputs.namespace }}\` |"
+            echo "| Manifests | \`${{ inputs.manifests_path }}\` |"
+            echo "| Cluster | \`${{ env.EKS_CLUSTER_NAME }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,61 @@
+# Backend: Pod + ClusterIP Service.
+# The Service is named "pulseboard-backend" on port 4000 because the
+# frontend nginx proxies /api/ -> http://pulseboard-backend:4000/api/.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pulseboard-backend
+  namespace: __NAMESPACE__
+  labels:
+    app: pulseboard
+    component: backend
+spec:
+  containers:
+  - name: backend
+    # Image is templated: __REGISTRY__ and __VERSION__ are injected by the
+    # deploy-to-eks workflow from the ECR URL + version you choose.
+    image: __REGISTRY__:pulseboard-backend-__VERSION__
+    imagePullPolicy: Always
+    ports:
+    - containerPort: 4000
+    env:
+    - name: PORT
+      value: "4000"
+    - name: CORS_ORIGIN
+      value: "*"
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 4000
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 4000
+      initialDelaySeconds: 10
+      periodSeconds: 20
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulseboard-backend
+  namespace: __NAMESPACE__
+  labels:
+    app: pulseboard
+    component: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: pulseboard
+    component: backend
+  ports:
+  - port: 4000
+    targetPort: 4000
