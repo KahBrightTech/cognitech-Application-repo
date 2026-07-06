@@ -1,5 +1,8 @@
 FROM node:22-alpine
 
+# Apply the latest Alpine security patches (openssl, libxml2, etc.)
+RUN apk update && apk upgrade --no-cache
+
 WORKDIR /app
 
 # Copy package files
