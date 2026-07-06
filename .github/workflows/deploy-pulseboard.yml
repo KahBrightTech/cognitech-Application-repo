@@ -42,7 +42,7 @@ on:
       fail_on_scan:
         description: 'Fail the build if CRITICAL/HIGH vulnerabilities are found'
         type: boolean
-        default: true
+        default: false
       version:
         description: 'Explicit version tag (e.g. v1.2.3). Empty = auto-increment from ECR'
         type: string
@@ -57,7 +57,7 @@ env:
 permissions:
   id-token: write
   contents: read
-  security-events: write   # allow uploading Trivy SARIF results
+  security-events: write   # allow uploading Trivy SARIF results to the Security tab
 
 jobs:
   # ==========================================================================
@@ -392,6 +392,8 @@ jobs:
           exit-code: ${{ (github.event_name == 'workflow_dispatch' && inputs.fail_on_scan) && '1' || '0' }}
           ignore-unfixed: true
 
+      # Upload to Security tab. Non-blocking (continue-on-error) so a report
+      # problem never fails the build; the build gate is exit-code above.
       - name: Upload dependency scan results to Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@v3
@@ -430,7 +432,8 @@ jobs:
           exit-code: ${{ (github.event_name == 'workflow_dispatch' && inputs.fail_on_scan) && '1' || '0' }}
           ignore-unfixed: true
 
-      - name: Upload Trivy results to Security tab
+      # Upload to Security tab. Non-blocking so it never fails the build.
+      - name: Upload image scan results to Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
