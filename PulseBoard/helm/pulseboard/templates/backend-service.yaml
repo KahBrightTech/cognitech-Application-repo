@@ -5,12 +5,12 @@ metadata:
   namespace: {{ .Values.global.namespace }}
   labels:
     {{- include "pulseboard.labels" . | nindent 4 }}
-    component: backend
+    component: {{ .Values.backend.component }}
 spec:
   type: {{ .Values.backend.service.type }}
   selector:
-    app: pulseboard
-    component: backend
+    app: {{ .Values.global.appLabel }}
+    component: {{ .Values.backend.component }}
   ports:
     - port: {{ .Values.backend.service.port }}
       targetPort: {{ .Values.backend.service.port }}

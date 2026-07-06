@@ -4,6 +4,8 @@
 global:
   # Namespace to deploy into. Overridden by the workflow's namespace input.
   namespace: pulseboard
+  # Common "app" label used in selectors and pod labels for every component.
+  appLabel: pulseboard
 
 image:
   # Full ECR registry host + repository. Both components share this repo and
@@ -14,6 +16,7 @@ image:
 
 backend:
   name: pulseboard-backend
+  component: backend # value for the "component" label / selector
   replicaCount: 1
   image:
     # Full tag within the shared repo, e.g. pulseboard-backend-v1.0.2
@@ -34,6 +37,7 @@ backend:
 
 frontend:
   name: pulseboard-frontend
+  component: frontend # value for the "component" label / selector
   replicaCount: 1
   image:
     tag: pulseboard-frontend-latest

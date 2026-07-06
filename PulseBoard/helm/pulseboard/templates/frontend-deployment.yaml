@@ -5,18 +5,18 @@ metadata:
   namespace: {{ .Values.global.namespace }}
   labels:
     {{- include "pulseboard.labels" . | nindent 4 }}
-    component: frontend
+    component: {{ .Values.frontend.component }}
 spec:
   replicas: {{ .Values.frontend.replicaCount }}
   selector:
     matchLabels:
-      app: pulseboard
-      component: frontend
+      app: {{ .Values.global.appLabel }}
+      component: {{ .Values.frontend.component }}
   template:
     metadata:
       labels:
-        app: pulseboard
-        component: frontend
+        app: {{ .Values.global.appLabel }}
+        component: {{ .Values.frontend.component }}
     spec:
       {{- if .Values.frontend.waitForBackend.enabled }}
       initContainers:
