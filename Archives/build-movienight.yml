@@ -1,0 +1,103 @@
+name: Build MovieNight
+
+# Caller workflow for the MovieNight app.
+#
+# Trigger: any change under the app folder (MovieNight/**) on main.
+# A change-detection job figures out WHICH component changed
+# (backend and/or frontend) and only builds those, so a backend-only
+# change won't bump the frontend version (and vice-versa).
+#
+# Each selected component runs the reusable CI pipeline, which
+# auto-detects its language, tests, builds and pushes a new version
+# (+ latest) to ECR. Deployment to EKS is handled separately by
+# release-deploy.yml.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'MovieNight/**'
+      - '.github/workflows/build-movienight.yml'
+      - '.github/workflows/ci-build-push.yml'
+  workflow_dispatch:   # manual run always builds ALL components
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
+
+jobs:
+  # ------------------------------------------------------------------
+  # Detect which app folders changed and build a dynamic matrix
+  # ------------------------------------------------------------------
+  changes:
+    name: Detect changed components
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      any: ${{ steps.set.outputs.any }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Path filter
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'MovieNight/backend/**'
+            frontend:
+              - 'MovieNight/frontend/**'
+
+      - name: Compose build matrix
+        id: set
+        run: |
+          set -e
+          # Manual runs (workflow_dispatch) force a full rebuild of all components.
+          FORCE_ALL="false"
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then FORCE_ALL="true"; fi
+
+          INCLUDE=""
+          add() {
+            # $1=component  $2=context path  $3=run_integration_tests
+            if [ -n "$INCLUDE" ]; then INCLUDE="$INCLUDE,"; fi
+            INCLUDE="$INCLUDE{\"component\":\"$1\",\"context\":\"$2\",\"run_integration_tests\":$3}"
+          }
+
+          if [ "$FORCE_ALL" == "true" ] || [ "${{ steps.filter.outputs.backend }}" == "true" ]; then
+            echo "🧩 backend changed -> will build"
+            add "backend" "./MovieNight/backend" "true"
+          fi
+          if [ "$FORCE_ALL" == "true" ] || [ "${{ steps.filter.outputs.frontend }}" == "true" ]; then
+            echo "🧩 frontend changed -> will build"
+            add "frontend" "./MovieNight/frontend" "false"
+          fi
+
+          if [ -z "$INCLUDE" ]; then
+            echo "✅ No app component changes detected - nothing to build."
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "matrix={\"include\":[$INCLUDE]}" >> "$GITHUB_OUTPUT"
+
+  # ------------------------------------------------------------------
+  # Build only the components that changed
+  # ------------------------------------------------------------------
+  build:
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    uses: ./.github/workflows/ci-build-push.yml
+    with:
+      app_name: movienight
+      component: ${{ matrix.component }}
+      context: ${{ matrix.context }}
+      run_integration_tests: ${{ matrix.run_integration_tests }}
+      run_image_scan: true
+      fail_on_scan: false
+    secrets: inherit

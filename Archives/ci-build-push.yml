@@ -1,0 +1,414 @@
+name: CI - Build, Test & Push to ECR
+
+# Reusable CI pipeline.
+# Auto-detects the language of a component, installs deps, lints,
+# runs unit + (optional) integration tests, builds a Docker image,
+# (optionally) scans it for vulnerabilities, and pushes it to ECR
+# with both a version tag and a `latest` tag.
+#
+# Called from a per-app "caller" workflow (see build-movienight.yml),
+# or run manually via workflow_dispatch for a single component.
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        description: 'Application name, e.g. movienight'
+        required: true
+        type: string
+      component:
+        description: 'Component name, e.g. backend or frontend'
+        required: true
+        type: string
+      context:
+        description: 'Path to the build context / source dir, e.g. ./MovieNight/backend'
+        required: true
+        type: string
+      dockerfile:
+        description: 'Dockerfile path relative to the context'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      run_integration_tests:
+        description: 'Run integration tests if present'
+        required: false
+        type: boolean
+        default: false
+      run_image_scan:
+        description: 'Scan the built image with Trivy'
+        required: false
+        type: boolean
+        default: true
+      fail_on_scan:
+        description: 'Fail the build if CRITICAL vulnerabilities are found'
+        required: false
+        type: boolean
+        default: false
+      version:
+        description: 'Explicit version tag (e.g. v1.2.3). Empty = auto-increment from ECR'
+        required: false
+        type: string
+        default: ''
+      aws_region:
+        description: 'AWS region that hosts the ECR repository and EKS cluster'
+        required: false
+        type: string
+        default: 'us-east-1'
+      ecr_repository:
+        description: 'Name of the shared ECR repository images are pushed to'
+        required: false
+        type: string
+        default: 'int-production-use1-ecs'
+      iam_role:
+        description: 'IAM role ARN assumed via GitHub OIDC to authenticate with AWS'
+        required: false
+        type: string
+        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
+    outputs:
+      version:
+        description: 'The version tag that was built and pushed'
+        value: ${{ jobs.build.outputs.version }}
+      image_tag:
+        description: 'The full image tag pushed to ECR (versioned)'
+        value: ${{ jobs.build.outputs.image_tag }}
+
+  # Allow running this workflow by hand for a single component.
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'Application name, e.g. movienight'
+        required: true
+        type: string
+      component:
+        description: 'Component name, e.g. backend'
+        required: true
+        type: string
+      context:
+        description: 'Path to the build context, e.g. ./MovieNight/backend'
+        required: true
+        type: string
+      dockerfile:
+        description: 'Dockerfile path relative to the context'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      run_integration_tests:
+        description: 'Run integration tests if present'
+        required: false
+        type: boolean
+        default: false
+      run_image_scan:
+        description: 'Scan the built image with Trivy'
+        required: false
+        type: boolean
+        default: true
+      fail_on_scan:
+        description: 'Fail the build if CRITICAL/HIGH vulnerabilities are found'
+        required: false
+        type: boolean
+        default: false
+      version:
+        description: 'Explicit version tag (e.g. v1.2.3). Empty = auto-increment from ECR'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write   # allow uploading Trivy SARIF results
+
+jobs:
+  build:
+    name: ${{ inputs.app_name }}-${{ inputs.component }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image_tag: ${{ steps.version.outputs.image_tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------
+      # 1. Detect language from marker files in the build context
+      # ----------------------------------------------------------------
+      - name: Detect language
+        id: detect
+        run: |
+          CTX="${{ inputs.context }}"
+          echo "🔍 Inspecting '$CTX' to detect language..."
+
+          if [ -f "$CTX/package.json" ]; then
+            LANG="node"
+          elif [ -f "$CTX/requirements.txt" ] || [ -f "$CTX/pyproject.toml" ] || [ -f "$CTX/setup.py" ]; then
+            LANG="python"
+          elif [ -f "$CTX/go.mod" ]; then
+            LANG="go"
+          elif [ -f "$CTX/pom.xml" ]; then
+            LANG="java-maven"
+          elif [ -f "$CTX/build.gradle" ] || [ -f "$CTX/build.gradle.kts" ]; then
+            LANG="java-gradle"
+          elif [ -f "$CTX/Cargo.toml" ]; then
+            LANG="rust"
+          elif ls "$CTX"/*.csproj >/dev/null 2>&1; then
+            LANG="dotnet"
+          else
+            LANG="unknown"
+          fi
+
+          echo "✅ Detected language: $LANG"
+          echo "language=$LANG" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------
+      # 2. Language-specific setup + install + lint + test
+      # ----------------------------------------------------------------
+
+      # ----- Node.js -----
+      - name: Setup Node.js
+        if: steps.detect.outputs.language == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Node - install / lint / test
+        if: steps.detect.outputs.language == 'node'
+        working-directory: ${{ inputs.context }}
+        run: |
+          set -e
+          echo "📦 Installing dependencies..."
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+          echo "🧹 Linting..."
+          npm run lint --if-present
+
+          echo "🧪 Running unit tests..."
+          if npm run | grep -q " test:ci"; then
+            npm run test:ci
+          elif npm run | grep -q " test"; then
+            npm test --if-present
+          else
+            echo "No test script defined - skipping."
+          fi
+
+      - name: Node - integration tests
+        if: steps.detect.outputs.language == 'node' && inputs.run_integration_tests
+        working-directory: ${{ inputs.context }}
+        run: |
+          echo "🔗 Running integration tests..."
+          npm run test:integration --if-present
+
+      # ----- Python -----
+      - name: Setup Python
+        if: steps.detect.outputs.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python - install / lint / test
+        if: steps.detect.outputs.language == 'python'
+        working-directory: ${{ inputs.context }}
+        run: |
+          set -e
+          echo "📦 Installing dependencies..."
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          if [ -f pyproject.toml ]; then pip install -e . || true; fi
+          pip install ruff pytest
+
+          echo "🧹 Linting with ruff..."
+          ruff check . || echo "⚠️  Lint warnings (non-blocking)."
+
+          echo "🧪 Running unit tests..."
+          if ls tests/ test/ *_test.py test_*.py >/dev/null 2>&1; then
+            pytest -q --ignore=tests/integration || pytest -q
+          else
+            echo "No tests found - skipping."
+          fi
+
+      - name: Python - integration tests
+        if: steps.detect.outputs.language == 'python' && inputs.run_integration_tests
+        working-directory: ${{ inputs.context }}
+        run: |
+          echo "🔗 Running integration tests..."
+          if [ -d tests/integration ]; then pytest -q tests/integration; else echo "No integration tests dir."; fi
+
+      # ----- Go -----
+      - name: Setup Go
+        if: steps.detect.outputs.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Go - build / vet / test
+        if: steps.detect.outputs.language == 'go'
+        working-directory: ${{ inputs.context }}
+        run: |
+          set -e
+          go mod download
+          echo "🧹 go vet..."
+          go vet ./...
+          echo "🧪 go test..."
+          go test ./... -v
+
+      # ----- Java (Maven) -----
+      - name: Setup JDK
+        if: steps.detect.outputs.language == 'java-maven' || steps.detect.outputs.language == 'java-gradle'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Maven - verify (compile + test)
+        if: steps.detect.outputs.language == 'java-maven'
+        working-directory: ${{ inputs.context }}
+        run: mvn -B verify
+
+      - name: Gradle - build (compile + test)
+        if: steps.detect.outputs.language == 'java-gradle'
+        working-directory: ${{ inputs.context }}
+        run: ./gradlew build
+
+      # ----- .NET -----
+      - name: Setup .NET
+        if: steps.detect.outputs.language == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: .NET - restore / build / test
+        if: steps.detect.outputs.language == 'dotnet'
+        working-directory: ${{ inputs.context }}
+        run: |
+          set -e
+          dotnet restore
+          dotnet build --no-restore -c Release
+          dotnet test --no-build -c Release
+
+      - name: Warn on unknown language
+        if: steps.detect.outputs.language == 'unknown'
+        run: |
+          echo "⚠️  Could not detect a known language in '${{ inputs.context }}'."
+          echo "    Skipping lint/test. The image will still be built from the Dockerfile."
+
+      # ----------------------------------------------------------------
+      # 3. AWS / ECR auth + resolve version
+      # ----------------------------------------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.iam_role }}
+          role-session-name: GitHubActions-${{ inputs.app_name }}-${{ github.run_id }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get AWS Account ID
+        id: account-id
+        run: echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve version
+        id: version
+        run: |
+          IMAGE_PREFIX="${{ inputs.app_name }}-${{ inputs.component }}"
+          REGISTRY="${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ inputs.aws_region }}.amazonaws.com/${{ inputs.ecr_repository }}"
+
+          if [ -n "${{ inputs.version }}" ]; then
+            NEW_VERSION="${{ inputs.version }}"
+            echo "📌 Using explicit version: $NEW_VERSION"
+          else
+            echo "🔍 Checking latest version in ECR for '${IMAGE_PREFIX}'..."
+            VERSIONS=$(aws ecr describe-images \
+              --repository-name "${{ inputs.ecr_repository }}" \
+              --region "${{ inputs.aws_region }}" \
+              --query 'imageDetails[*].imageTags[]' \
+              --output text 2>/dev/null | tr '\t' '\n' \
+              | grep -E "^${IMAGE_PREFIX}-v[0-9]+\.[0-9]+\.[0-9]+$" \
+              | sed "s/${IMAGE_PREFIX}-v//" || echo "")
+
+            if [ -z "$VERSIONS" ]; then
+              NEW_VERSION="v1.0.0"
+              echo "📌 No previous versions found. Starting at $NEW_VERSION"
+            else
+              LATEST=$(echo "$VERSIONS" | sort -V | tail -n 1)
+              MAJOR=$(echo "$LATEST" | cut -d. -f1)
+              MINOR=$(echo "$LATEST" | cut -d. -f2)
+              PATCH=$(echo "$LATEST" | cut -d. -f3)
+              NEW_VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+              echo "🚀 Auto-incrementing v${LATEST} -> ${NEW_VERSION}"
+            fi
+          fi
+
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${REGISTRY}:${IMAGE_PREFIX}-${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image_latest=${REGISTRY}:${IMAGE_PREFIX}-latest" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------
+      # 4. Build image (load locally so we can scan before pushing)
+      # ----------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.context }}/${{ inputs.dockerfile }}
+          load: true
+          tags: ${{ steps.version.outputs.image_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ----------------------------------------------------------------
+      # 5. (Optional) Vulnerability scan
+      # ----------------------------------------------------------------
+      - name: Scan image with Trivy
+        if: inputs.run_image_scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ steps.version.outputs.image_tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: ${{ inputs.fail_on_scan && '1' || '0' }}
+          ignore-unfixed: true
+
+      - name: Upload Trivy results to Security tab
+        if: inputs.run_image_scan && always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true
+
+      # ----------------------------------------------------------------
+      # 6. Push version + latest tags to ECR
+      # ----------------------------------------------------------------
+      - name: Push to ECR
+        run: |
+          echo "⬆️  Pushing versioned image..."
+          docker push "${{ steps.version.outputs.image_tag }}"
+
+          echo "🏷️  Tagging + pushing latest..."
+          docker tag "${{ steps.version.outputs.image_tag }}" "${{ steps.version.outputs.image_latest }}"
+          docker push "${{ steps.version.outputs.image_latest }}"
+
+          echo "✅ Pushed:"
+          echo "   - ${{ steps.version.outputs.image_tag }}"
+          echo "   - ${{ steps.version.outputs.image_latest }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "## 🐳 ${{ inputs.app_name }}-${{ inputs.component }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Language | \`${{ steps.detect.outputs.language }}\` |"
+            echo "| Version | \`${{ steps.version.outputs.version }}\` |"
+            echo "| Image | \`${{ inputs.app_name }}-${{ inputs.component }}-${{ steps.version.outputs.version }}\` |"
+            echo "| Integration tests | ${{ inputs.run_integration_tests }} |"
+            echo "| Image scan | ${{ inputs.run_image_scan }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

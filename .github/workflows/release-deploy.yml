@@ -1,0 +1,218 @@
+name: Release - Deploy to EKS
+
+# Release-team workflow. Deploys an ALREADY-BUILT image version
+# (produced by the CI build workflow) to a specific EKS namespace.
+# No building or testing happens here - it only promotes a known-good
+# version to the cluster via Helm.
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: 'Application to deploy'
+        required: true
+        type: choice
+        options:
+          - movienight
+        default: movienight
+      version:
+        description: 'Version to deploy (e.g. v1.2.3). Must already exist in ECR.'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment (selects the Helm values file)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: prod
+      namespace:
+        description: 'Kubernetes namespace (leave blank to use the app default)'
+        required: false
+        type: string
+        default: ''
+      action:
+        description: 'Deploy, rollback, or uninstall'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - rollback
+          - uninstall
+        default: deploy
+      dry_run:
+        description: 'Render/plan only - do not apply changes'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: int-production-use1-ecs
+  EKS_CLUSTER_NAME: int-production-use1-prod-novutech-eks-cluster
+  IAM_ROLE: arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ inputs.action }} ${{ inputs.app }} ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------
+      # Resolve per-app settings (chart path, release name, namespace)
+      # ----------------------------------------------------------------
+      - name: Resolve deployment settings
+        id: cfg
+        run: |
+          APP="${{ inputs.app }}"
+          case "$APP" in
+            movienight)
+              CHART="./MovieNight/helm/movienight"
+              RELEASE="movienight"
+              DEFAULT_NS="movienight"
+              ;;
+            *)
+              echo "❌ Unknown app: $APP"
+              exit 1
+              ;;
+          esac
+
+          NS="${{ inputs.namespace }}"
+          if [ -z "$NS" ]; then NS="$DEFAULT_NS"; fi
+
+          VALUES="${CHART}/values-${{ inputs.environment }}.yaml"
+          if [ ! -f "$VALUES" ]; then
+            echo "⚠️  $VALUES not found - falling back to values.yaml"
+            VALUES="${CHART}/values.yaml"
+          fi
+
+          echo "chart=$CHART"       >> "$GITHUB_OUTPUT"
+          echo "release=$RELEASE"   >> "$GITHUB_OUTPUT"
+          echo "namespace=$NS"      >> "$GITHUB_OUTPUT"
+          echo "values=$VALUES"     >> "$GITHUB_OUTPUT"
+
+          echo "📋 App: $APP | Release: $RELEASE | Namespace: $NS"
+          echo "📋 Chart: $CHART | Values: $VALUES | Version: ${{ inputs.version }}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE }}
+          role-session-name: GitHubActions-Release-${{ inputs.app }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ----------------------------------------------------------------
+      # Verify the requested version actually exists in ECR (deploy only)
+      # ----------------------------------------------------------------
+      - name: Verify image version exists in ECR
+        if: inputs.action == 'deploy'
+        run: |
+          for COMPONENT in backend frontend; do
+            TAG="${{ inputs.app }}-${COMPONENT}-${{ inputs.version }}"
+            echo "🔍 Checking for tag: $TAG"
+            aws ecr describe-images \
+              --repository-name "${{ env.ECR_REPOSITORY }}" \
+              --region "${{ env.AWS_REGION }}" \
+              --image-ids imageTag="$TAG" >/dev/null 2>&1 \
+              && echo "   ✅ Found $TAG" \
+              || { echo "   ❌ $TAG not found in ECR. Build it first."; exit 1; }
+          done
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name "${{ env.EKS_CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      # ----------------------------------------------------------------
+      # Deploy
+      # ----------------------------------------------------------------
+      - name: Deploy with Helm
+        if: inputs.action == 'deploy'
+        run: |
+          EXTRA=""
+          if [ "${{ inputs.dry_run }}" == "true" ]; then
+            EXTRA="--dry-run --debug"
+            echo "🧪 DRY RUN - no changes will be applied"
+          fi
+
+          helm upgrade --install "${{ steps.cfg.outputs.release }}" "${{ steps.cfg.outputs.chart }}" \
+            --namespace "${{ steps.cfg.outputs.namespace }}" \
+            --create-namespace \
+            --values "${{ steps.cfg.outputs.values }}" \
+            --set backend.image.tag=${{ inputs.app }}-backend-${{ inputs.version }} \
+            --set frontend.image.tag=${{ inputs.app }}-frontend-${{ inputs.version }} \
+            --set secrets.tmdbApiKey=${{ secrets.TMDB_API_KEY }} \
+            --wait \
+            --timeout 15m \
+            --atomic \
+            $EXTRA
+
+      # ----------------------------------------------------------------
+      # Rollback
+      # ----------------------------------------------------------------
+      - name: Rollback release
+        if: inputs.action == 'rollback'
+        run: |
+          echo "⏪ Rolling back ${{ steps.cfg.outputs.release }} to the previous revision..."
+          helm rollback "${{ steps.cfg.outputs.release }}" -n "${{ steps.cfg.outputs.namespace }}"
+
+      # ----------------------------------------------------------------
+      # Uninstall
+      # ----------------------------------------------------------------
+      - name: Uninstall release
+        if: inputs.action == 'uninstall'
+        run: |
+          echo "🗑️  Uninstalling ${{ steps.cfg.outputs.release }} from ${{ steps.cfg.outputs.namespace }}..."
+          helm uninstall "${{ steps.cfg.outputs.release }}" -n "${{ steps.cfg.outputs.namespace }}"
+
+      # ----------------------------------------------------------------
+      # Verify + summary
+      # ----------------------------------------------------------------
+      - name: Verify deployment
+        if: inputs.action == 'deploy' && inputs.dry_run == false
+        run: |
+          NS="${{ steps.cfg.outputs.namespace }}"
+          echo "=== Helm history ==="
+          helm history "${{ steps.cfg.outputs.release }}" -n "$NS" || true
+          echo "=== Pods ==="
+          kubectl get pods -n "$NS"
+          echo "=== Services ==="
+          kubectl get svc -n "$NS"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## 🚀 Release: ${{ inputs.app }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Action | \`${{ inputs.action }}\` |"
+            echo "| Version | \`${{ inputs.version }}\` |"
+            echo "| Environment | \`${{ inputs.environment }}\` |"
+            echo "| Namespace | \`${{ steps.cfg.outputs.namespace }}\` |"
+            echo "| Cluster | \`${{ env.EKS_CLUSTER_NAME }}\` |"
+            echo "| Dry run | \`${{ inputs.dry_run }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Rollback on failed deploy
+        if: failure() && inputs.action == 'deploy' && inputs.dry_run == false
+        run: |
+          echo "❌ Deploy failed. Attempting automatic rollback..."
+          helm rollback "${{ steps.cfg.outputs.release }}" -n "${{ steps.cfg.outputs.namespace }}" || echo "No previous revision to roll back to."

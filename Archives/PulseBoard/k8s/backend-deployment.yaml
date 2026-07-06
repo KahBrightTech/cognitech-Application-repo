@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pulseboard-backend
+  namespace: pulseboard
+  labels:
+    app: pulseboard
+    component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pulseboard
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: pulseboard
+        component: backend
+    spec:
+      containers:
+      - name: backend
+        image: YOUR_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/pulseboard:backend-latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 4000
+          name: http
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: pulseboard-config
+              key: NODE_ENV
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: pulseboard-config
+              key: PORT
+        - name: CORS_ORIGIN
+          valueFrom:
+            configMapKeyRef:
+              name: pulseboard-config
+              key: CORS_ORIGIN
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "300m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 4000
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 4000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulseboard-backend
+  namespace: pulseboard
+  labels:
+    app: pulseboard
+    component: backend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 4000
+    targetPort: 4000
+    protocol: TCP
+    name: http
+  selector:
+    app: pulseboard
+    component: backend

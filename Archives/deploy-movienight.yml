@@ -189,13 +189,38 @@ jobs:
         docker push ${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:movienight-frontend-latest
         echo "✅ Frontend images pushed"
 
-    - name: Update kubeconfig
+    - name: Check if EKS cluster exists
       if: steps.action.outputs.action == 'deploy' || steps.action.outputs.action == 'delete'
+      id: cluster-check
+      run: |
+        echo "🔍 Checking if EKS cluster '${{ env.EKS_CLUSTER_NAME }}' exists..."
+        
+        CLUSTER_STATUS=$(aws eks describe-cluster \
+          --name ${{ env.EKS_CLUSTER_NAME }} \
+          --region ${{ env.AWS_REGION }} \
+          --query 'cluster.status' \
+          --output text 2>/dev/null || echo "NOT_FOUND")
+        
+        if [ "$CLUSTER_STATUS" == "NOT_FOUND" ]; then
+          echo "cluster_exists=false" >> $GITHUB_OUTPUT
+          echo "⚠️  EKS cluster '${{ env.EKS_CLUSTER_NAME }}' was not found."
+          echo "   Skipping deployment steps. Images are available in ECR."
+        elif [ "$CLUSTER_STATUS" == "ACTIVE" ]; then
+          echo "cluster_exists=true" >> $GITHUB_OUTPUT
+          echo "✅ EKS cluster '${{ env.EKS_CLUSTER_NAME }}' is ACTIVE."
+        else
+          echo "cluster_exists=false" >> $GITHUB_OUTPUT
+          echo "⚠️  EKS cluster '${{ env.EKS_CLUSTER_NAME }}' exists but is in '$CLUSTER_STATUS' state (not ACTIVE)."
+          echo "   Skipping deployment steps. Images are available in ECR."
+        fi
+
+    - name: Update kubeconfig
+      if: (steps.action.outputs.action == 'deploy' || steps.action.outputs.action == 'delete') && steps.cluster-check.outputs.cluster_exists == 'true'
       run: |
         aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
     - name: Delete deployment
-      if: steps.action.outputs.action == 'delete'
+      if: steps.action.outputs.action == 'delete' && steps.cluster-check.outputs.cluster_exists == 'true'
       run: |
         echo "🗑️  Deleting MovieNight deployment..."
         
@@ -212,12 +237,12 @@ jobs:
         kubectl get all -n ${{ env.K8S_NAMESPACE }} || echo "No resources found"
 
     - name: Create namespace if not exists
-      if: steps.action.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy' && steps.cluster-check.outputs.cluster_exists == 'true'
       run: |
         kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Create secrets
-      if: steps.action.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy' && steps.cluster-check.outputs.cluster_exists == 'true'
       run: |
         kubectl create secret generic movienight-secrets \
           --from-literal=tmdb-api-key=${{ secrets.TMDB_API_KEY }} \
@@ -225,7 +250,7 @@ jobs:
           --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Deploy backend
-      if: steps.action.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy' && steps.cluster-check.outputs.cluster_exists == 'true'
       run: |
         cat <<EOF | kubectl apply -f -
         apiVersion: apps/v1
@@ -284,7 +309,7 @@ jobs:
         EOF
 
     - name: Deploy frontend
-      if: steps.action.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy' && steps.cluster-check.outputs.cluster_exists == 'true'
       run: |
         cat <<EOF | kubectl apply -f -
         apiVersion: apps/v1
@@ -337,13 +362,13 @@ jobs:
         EOF
 
     - name: Wait for deployment rollout
-      if: steps.action.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy' && steps.cluster-check.outputs.cluster_exists == 'true'
       run: |
         kubectl rollout status deployment/movienight-backend -n ${{ env.K8S_NAMESPACE }} --timeout=5m
         kubectl rollout status deployment/movienight-frontend -n ${{ env.K8S_NAMESPACE }} --timeout=5m
 
     - name: Verify deployment
-      if: steps.action.outputs.action == 'deploy'
+      if: steps.action.outputs.action == 'deploy' && steps.cluster-check.outputs.cluster_exists == 'true'
       run: |
         echo "=== Deployments ==="
         kubectl get deployments -n ${{ env.K8S_NAMESPACE }}
@@ -375,12 +400,23 @@ jobs:
           echo "🚀 EKS Cluster: ${{ env.EKS_CLUSTER_NAME }}"
           echo "📍 Namespace: ${{ env.K8S_NAMESPACE }}"
           echo ""
-          echo "✅ Deployment completed successfully"
-          echo "🍿 MovieNight version ${{ steps.version.outputs.version }} is running!"
+          if [ "${{ steps.cluster-check.outputs.cluster_exists }}" == "true" ]; then
+            echo "✅ Deployment completed successfully"
+            echo "🍿 MovieNight version ${{ steps.version.outputs.version }} is running!"
+          else
+            echo "⚠️  EKS cluster '${{ env.EKS_CLUSTER_NAME }}' not found or not ACTIVE."
+            echo "   Stopped after pushing images to ECR. No deployment performed."
+            echo "   Re-run this workflow once the cluster is available to deploy."
+          fi
         elif [ "${{ steps.action.outputs.action }}" == "delete" ]; then
           echo ""
-          echo "🗑️  Deployment deleted from cluster"
-          echo "📍 Namespace: ${{ env.K8S_NAMESPACE }}"
+          if [ "${{ steps.cluster-check.outputs.cluster_exists }}" == "true" ]; then
+            echo "🗑️  Deployment deleted from cluster"
+            echo "📍 Namespace: ${{ env.K8S_NAMESPACE }}"
+          else
+            echo "⚠️  EKS cluster '${{ env.EKS_CLUSTER_NAME }}' not found or not ACTIVE."
+            echo "   Nothing to delete."
+          fi
         fi
         echo ""
         echo "════════════════════════════════════════"

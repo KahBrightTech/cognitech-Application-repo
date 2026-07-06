@@ -1,0 +1,444 @@
+name: MovieNight CI/CD            # 👈 RENAME per app (e.g. "HirePath CI/CD")
+
+# =============================================================================
+# Self-contained CI/CD pipeline for ONE application.
+# Copy this file, rename it, and change the marked spots (👈) to onboard a new
+# app. It watches the app folder for CODE changes only (docs/markdown/images
+# are ignored), auto-detects the language of each component, lints, tests,
+# builds a Docker image, optionally scans it, and pushes a new version
+# (+ latest) to ECR.
+#
+# To adapt for a new app you only edit:
+#   1. The workflow `name:` above
+#   2. The `on.push.paths` globs (app folder + this file's name)
+#   3. `env.APP_NAME`
+#   4. The component list in the "changes" job (contexts / integration flag)
+# =============================================================================
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # --- watch the app folder, CODE files only ---
+      - 'MovieNight/**'                       # 👈 app folder
+      # --- but ignore non-code files so docs edits don't trigger a build ---
+      - '!MovieNight/**/*.md'
+      - '!MovieNight/**/*.markdown'
+      - '!MovieNight/**/*.rst'
+      - '!MovieNight/**/*.adoc'
+      - '!MovieNight/**/LICENSE*'
+      - '!MovieNight/**/docs/**'
+      - '!MovieNight/**/*.png'
+      - '!MovieNight/**/*.jpg'
+      - '!MovieNight/**/*.jpeg'
+      - '!MovieNight/**/*.gif'
+      - '!MovieNight/**/*.svg'
+      - '!MovieNight/**/*.ico'
+      # --- always trigger when this workflow itself changes ---
+      - '.github/workflows/movienight-cicd.yml'   # 👈 this file's name
+  workflow_dispatch:
+    inputs:
+      run_integration_tests:
+        description: 'Run integration tests if present'
+        type: boolean
+        default: true
+      run_image_scan:
+        description: 'Scan the built image with Trivy'
+        type: boolean
+        default: true
+      fail_on_scan:
+        description: 'Fail the build if CRITICAL/HIGH vulnerabilities are found'
+        type: boolean
+        default: false
+      version:
+        description: 'Explicit version tag (e.g. v1.2.3). Empty = auto-increment from ECR'
+        type: string
+        default: ''
+
+env:
+  APP_NAME: movienight                                                       # 👈 app name (image tag prefix)
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: int-production-use1-ecs
+  IAM_ROLE: arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write   # allow uploading Trivy SARIF results
+
+jobs:
+  # ==========================================================================
+  # 1. Detect which components changed (code only) and build a dynamic matrix
+  # ==========================================================================
+  changes:
+    name: Detect changed components
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      any: ${{ steps.set.outputs.any }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Path filter
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'MovieNight/backend/**'
+              - '!MovieNight/backend/**/*.md'
+              - '!MovieNight/backend/**/docs/**'
+            frontend:
+              - 'MovieNight/frontend/**'
+              - '!MovieNight/frontend/**/*.md'
+              - '!MovieNight/frontend/**/docs/**'
+
+      - name: Compose build matrix
+        id: set
+        run: |
+          set -e
+          # Manual runs (workflow_dispatch) force a full rebuild of all components.
+          FORCE_ALL="false"
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then FORCE_ALL="true"; fi
+
+          INCLUDE=""
+          add() {
+            # $1=component  $2=context path  $3=run_integration_tests
+            if [ -n "$INCLUDE" ]; then INCLUDE="$INCLUDE,"; fi
+            INCLUDE="$INCLUDE{\"component\":\"$1\",\"context\":\"$2\",\"integration\":$3}"
+          }
+
+          # 👇 declare the app's components here (component | context | integration tests?)
+          if [ "$FORCE_ALL" == "true" ] || [ "${{ steps.filter.outputs.backend }}" == "true" ]; then
+            echo "🧩 backend changed -> will build"
+            add "backend" "./MovieNight/backend" "true"
+          fi
+          if [ "$FORCE_ALL" == "true" ] || [ "${{ steps.filter.outputs.frontend }}" == "true" ]; then
+            echo "🧩 frontend changed -> will build"
+            add "frontend" "./MovieNight/frontend" "false"
+          fi
+
+          if [ -z "$INCLUDE" ]; then
+            echo "✅ No code changes detected - nothing to build."
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "matrix={\"include\":[$INCLUDE]}" >> "$GITHUB_OUTPUT"
+
+  # ==========================================================================
+  # 2. Build, test, scan & push each changed component
+  # ==========================================================================
+  build:
+    name: ${{ matrix.component }}
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------
+      # Detect language from marker files in the component's context
+      # ----------------------------------------------------------------
+      - name: Detect language
+        id: detect
+        run: |
+          CTX="${{ matrix.context }}"
+          echo "🔍 Inspecting '$CTX' to detect language..."
+
+          if [ -f "$CTX/package.json" ]; then
+            LANG="node"
+          elif [ -f "$CTX/requirements.txt" ] || [ -f "$CTX/pyproject.toml" ] || [ -f "$CTX/setup.py" ]; then
+            LANG="python"
+          elif [ -f "$CTX/go.mod" ]; then
+            LANG="go"
+          elif [ -f "$CTX/pom.xml" ]; then
+            LANG="java-maven"
+          elif [ -f "$CTX/build.gradle" ] || [ -f "$CTX/build.gradle.kts" ]; then
+            LANG="java-gradle"
+          elif [ -f "$CTX/Cargo.toml" ]; then
+            LANG="rust"
+          elif ls "$CTX"/*.csproj >/dev/null 2>&1; then
+            LANG="dotnet"
+          else
+            LANG="unknown"
+          fi
+
+          echo "✅ Detected language: $LANG"
+          echo "language=$LANG" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------
+      # Language-specific setup + install + lint + test
+      # ----------------------------------------------------------------
+      # ----- Node.js -----
+      - name: Setup Node.js
+        if: steps.detect.outputs.language == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Node - install / lint / test
+        if: steps.detect.outputs.language == 'node'
+        working-directory: ${{ matrix.context }}
+        run: |
+          set -e
+          echo "📦 Installing dependencies..."
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          echo "🧹 Linting..."
+          npm run lint --if-present
+          echo "🧪 Running unit tests..."
+          if npm run | grep -q " test:ci"; then
+            npm run test:ci
+          elif npm run | grep -q " test"; then
+            npm test --if-present
+          else
+            echo "No test script defined - skipping."
+          fi
+
+      - name: Node - integration tests
+        if: steps.detect.outputs.language == 'node' && matrix.integration
+        working-directory: ${{ matrix.context }}
+        run: |
+          echo "🔗 Running integration tests..."
+          npm run test:integration --if-present
+
+      # ----- Python -----
+      - name: Setup Python
+        if: steps.detect.outputs.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python - install / lint / test
+        if: steps.detect.outputs.language == 'python'
+        working-directory: ${{ matrix.context }}
+        run: |
+          set -e
+          echo "📦 Installing dependencies..."
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          if [ -f pyproject.toml ]; then pip install -e . || true; fi
+          pip install ruff pytest
+          echo "🧹 Linting with ruff..."
+          ruff check . || echo "⚠️  Lint warnings (non-blocking)."
+          echo "🧪 Running unit tests..."
+          if ls tests/ test/ *_test.py test_*.py >/dev/null 2>&1; then
+            pytest -q --ignore=tests/integration || pytest -q
+          else
+            echo "No tests found - skipping."
+          fi
+
+      - name: Python - integration tests
+        if: steps.detect.outputs.language == 'python' && matrix.integration
+        working-directory: ${{ matrix.context }}
+        run: |
+          echo "🔗 Running integration tests..."
+          if [ -d tests/integration ]; then pytest -q tests/integration; else echo "No integration tests dir."; fi
+
+      # ----- Go -----
+      - name: Setup Go
+        if: steps.detect.outputs.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Go - build / vet / test
+        if: steps.detect.outputs.language == 'go'
+        working-directory: ${{ matrix.context }}
+        run: |
+          set -e
+          go mod download
+          go vet ./...
+          go test ./... -v
+
+      # ----- Java -----
+      - name: Setup JDK
+        if: steps.detect.outputs.language == 'java-maven' || steps.detect.outputs.language == 'java-gradle'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Maven - verify
+        if: steps.detect.outputs.language == 'java-maven'
+        working-directory: ${{ matrix.context }}
+        run: mvn -B verify
+
+      - name: Gradle - build
+        if: steps.detect.outputs.language == 'java-gradle'
+        working-directory: ${{ matrix.context }}
+        run: ./gradlew build
+
+      # ----- .NET -----
+      - name: Setup .NET
+        if: steps.detect.outputs.language == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: .NET - restore / build / test
+        if: steps.detect.outputs.language == 'dotnet'
+        working-directory: ${{ matrix.context }}
+        run: |
+          set -e
+          dotnet restore
+          dotnet build --no-restore -c Release
+          dotnet test --no-build -c Release
+
+      - name: Warn on unknown language
+        if: steps.detect.outputs.language == 'unknown'
+        run: |
+          echo "⚠️  Could not detect a known language in '${{ matrix.context }}'."
+          echo "    Skipping lint/test. The image will still be built from the Dockerfile."
+
+      # ----------------------------------------------------------------
+      # AWS / ECR auth + resolve version
+      # ----------------------------------------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE }}
+          role-session-name: GitHubActions-${{ env.APP_NAME }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get AWS Account ID
+        id: account-id
+        run: echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve version
+        id: version
+        run: |
+          IMAGE_PREFIX="${{ env.APP_NAME }}-${{ matrix.component }}"
+          REGISTRY="${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
+          INPUT_VERSION="${{ github.event.inputs.version }}"
+
+          if [ -n "$INPUT_VERSION" ]; then
+            NEW_VERSION="$INPUT_VERSION"
+            echo "📌 Using explicit version: $NEW_VERSION"
+          else
+            echo "🔍 Checking latest version in ECR for '${IMAGE_PREFIX}'..."
+            VERSIONS=$(aws ecr describe-images \
+              --repository-name "${{ env.ECR_REPOSITORY }}" \
+              --region "${{ env.AWS_REGION }}" \
+              --query 'imageDetails[*].imageTags[]' \
+              --output text 2>/dev/null | tr '\t' '\n' \
+              | grep -E "^${IMAGE_PREFIX}-v[0-9]+\.[0-9]+\.[0-9]+$" \
+              | sed "s/${IMAGE_PREFIX}-v//" || echo "")
+
+            if [ -z "$VERSIONS" ]; then
+              NEW_VERSION="v1.0.0"
+              echo "📌 No previous versions found. Starting at $NEW_VERSION"
+            else
+              LATEST=$(echo "$VERSIONS" | sort -V | tail -n 1)
+              MAJOR=$(echo "$LATEST" | cut -d. -f1)
+              MINOR=$(echo "$LATEST" | cut -d. -f2)
+              PATCH=$(echo "$LATEST" | cut -d. -f3)
+              NEW_VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+              echo "🚀 Auto-incrementing v${LATEST} -> ${NEW_VERSION}"
+            fi
+          fi
+
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${REGISTRY}:${IMAGE_PREFIX}-${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image_latest=${REGISTRY}:${IMAGE_PREFIX}-latest" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------
+      # (Optional) Dependency scan of the SOURCE (filesystem).
+      # Reads lockfiles/manifests directly (package-lock.json,
+      # requirements.txt, go.sum, pom.xml, etc.), so React/npm and other
+      # dependency CVEs are caught even when a multi-stage Dockerfile
+      # discards them from the final image.
+      # ----------------------------------------------------------------
+      - name: Scan dependencies with Trivy (filesystem)
+        if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: 'fs'
+          scan-ref: ${{ matrix.context }}
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: ${{ (github.event_name == 'workflow_dispatch' && inputs.fail_on_scan) && '1' || '0' }}
+          ignore-unfixed: true
+
+      - name: Upload dependency scan results to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+          category: trivy-fs-${{ matrix.component }}
+        continue-on-error: true
+
+      # ----------------------------------------------------------------
+      # Build image (load locally so we can scan before pushing)
+      # ----------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          load: true
+          tags: ${{ steps.version.outputs.image_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ----------------------------------------------------------------
+      # (Optional) Vulnerability scan
+      # ----------------------------------------------------------------
+      - name: Scan image with Trivy
+        if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ steps.version.outputs.image_tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: ${{ (github.event_name == 'workflow_dispatch' && inputs.fail_on_scan) && '1' || '0' }}
+          ignore-unfixed: true
+
+      - name: Upload Trivy results to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: trivy-image-${{ matrix.component }}
+        continue-on-error: true
+
+      # ----------------------------------------------------------------
+      # Push version + latest tags to ECR
+      # ----------------------------------------------------------------
+      - name: Push to ECR
+        run: |
+          echo "⬆️  Pushing versioned image..."
+          docker push "${{ steps.version.outputs.image_tag }}"
+          echo "🏷️  Tagging + pushing latest..."
+          docker tag "${{ steps.version.outputs.image_tag }}" "${{ steps.version.outputs.image_latest }}"
+          docker push "${{ steps.version.outputs.image_latest }}"
+          echo "✅ Pushed:"
+          echo "   - ${{ steps.version.outputs.image_tag }}"
+          echo "   - ${{ steps.version.outputs.image_latest }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "## 🐳 ${{ env.APP_NAME }}-${{ matrix.component }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Language | \`${{ steps.detect.outputs.language }}\` |"
+            echo "| Version | \`${{ steps.version.outputs.version }}\` |"
+            echo "| Image | \`${{ env.APP_NAME }}-${{ matrix.component }}-${{ steps.version.outputs.version }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
