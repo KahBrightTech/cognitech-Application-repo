@@ -29,8 +29,6 @@ on:
       - '!PulseBoard/**/*.gif'
       - '!PulseBoard/**/*.svg'
       - '!PulseBoard/**/*.ico'
-      # --- always trigger when this workflow itself changes ---
-      - '.github/workflows/deploy-pulseboard.yml'
   workflow_dispatch:
     inputs:
       run_integration_tests:
@@ -106,11 +104,6 @@ jobs:
             else
               CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || echo "")
               if [ -z "$CHANGED" ]; then BUILD_ALL="true"; fi
-              # An edit to this workflow file rebuilds all components.
-              if echo "$CHANGED" | grep -qx ".github/workflows/deploy-pulseboard.yml"; then
-                echo "🛠️  Workflow file changed -> building all components."
-                BUILD_ALL="true"
-              fi
             fi
           fi
 
@@ -389,7 +382,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Scan dependencies with Trivy (filesystem)
         if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           scan-ref: ${{ matrix.context }}
@@ -428,7 +421,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: Scan image with Trivy
         if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.version.outputs.image_tag }}
           format: 'sarif'
