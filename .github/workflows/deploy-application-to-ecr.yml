@@ -1,0 +1,525 @@
+name: Deploy Application to ECR
+
+# =============================================================================
+# Generic, reusable CI pipeline for ANY app in this repo.
+# Auto-detects each component's language, lints, tests, builds a Docker
+# image, scans it (source + image), and pushes a new version (+ latest)
+# to ECR. It does NOT deploy to EKS.
+#
+# It is app-agnostic: the ONLY app-specific values are the `app_name`
+# (image tag prefix) and `app_dir` (folder to build) inputs.
+#
+# Because `push:`/`paths:` filters cannot live in a reusable workflow, each
+# app has a tiny caller (e.g. deploy-pulseboard.yml) that owns the trigger
+# and does: `uses: ./.github/workflows/ci-build-push.yml`.
+# =============================================================================
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        description: 'App name / image tag prefix, e.g. pulseboard'
+        required: true
+        type: string
+      app_dir:
+        description: 'Folder to build, e.g. PulseBoard'
+        required: true
+        type: string
+      run_integration_tests:
+        description: 'Run integration tests if present'
+        required: false
+        type: boolean
+        default: true
+      run_image_scan:
+        description: 'Scan the built image with Trivy'
+        required: false
+        type: boolean
+        default: true
+      fail_on_scan:
+        description: 'Fail the build if CRITICAL/HIGH vulnerabilities are found'
+        required: false
+        type: boolean
+        default: false
+      version:
+        description: 'Explicit version tag (e.g. v1.2.3). Empty = auto-increment from ECR'
+        required: false
+        type: string
+        default: ''
+      aws_region:
+        description: 'AWS region'
+        required: false
+        type: string
+        default: 'us-east-1'
+      ecr_repository:
+        description: 'ECR repository name'
+        required: false
+        type: string
+        default: 'int-production-use1-ecs'
+      iam_role:
+        description: 'IAM role ARN to assume via OIDC'
+        required: false
+        type: string
+        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
+
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'App name / image tag prefix, e.g. pulseboard'
+        required: true
+        type: string
+        default: 'pulseboard'
+      app_dir:
+        description: 'Folder to build, e.g. PulseBoard'
+        required: true
+        type: string
+        default: 'PulseBoard'
+      run_integration_tests:
+        description: 'Run integration tests if present'
+        type: boolean
+        default: true
+      run_image_scan:
+        description: 'Scan the built image with Trivy'
+        type: boolean
+        default: true
+      fail_on_scan:
+        description: 'Fail the build if CRITICAL/HIGH vulnerabilities are found'
+        type: boolean
+        default: false
+      version:
+        description: 'Explicit version tag (e.g. v1.2.3). Empty = auto-increment from ECR'
+        type: string
+        default: ''
+      aws_region:
+        description: 'AWS region'
+        required: false
+        type: string
+        default: 'us-east-1'
+      ecr_repository:
+        description: 'ECR repository name'
+        required: false
+        type: string
+        default: 'int-production-use1-ecs'
+      iam_role:
+        description: 'IAM role ARN to assume via OIDC'
+        required: false
+        type: string
+        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
+
+env:
+  APP_NAME: ${{ inputs.app_name }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  ECR_REPOSITORY: ${{ inputs.ecr_repository }}
+  IAM_ROLE: ${{ inputs.iam_role }}
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write   # allow uploading Trivy SARIF results to the Security tab
+
+jobs:
+  # ==========================================================================
+  # 1. Detect which components changed (code only) and build a dynamic matrix
+  # ==========================================================================
+  changes:
+    name: Detect changed components
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      any: ${{ steps.set.outputs.any }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need history so we can diff against the previous commit
+
+      - name: Discover components & detect changes
+        id: set
+        run: |
+          set -e
+          APP_DIR="${{ inputs.app_dir }}"   # 👈 the only app-specific value in this job
+
+          # --- Auto-discover components: every directory with a Dockerfile ---
+          mapfile -t DFILES < <(find "$APP_DIR" -type f -iname 'Dockerfile' | sort)
+
+          if [ ${#DFILES[@]} -eq 0 ]; then
+            echo "❌ No Dockerfile found under '$APP_DIR'. Nothing to build."
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # --- Decide whether to build everything or only changed components ---
+          BUILD_ALL="false"
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then BUILD_ALL="true"; fi
+
+          CHANGED=""
+          if [ "$BUILD_ALL" != "true" ]; then
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+            if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              BUILD_ALL="true"   # new branch / no diff base -> build all
+            else
+              CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || echo "")
+              if [ -z "$CHANGED" ]; then BUILD_ALL="true"; fi
+            fi
+          fi
+
+          # A path is "code" unless it's docs/markdown/images.
+          is_code() {
+            case "$1" in
+              *.md|*.markdown|*.rst|*.adoc|*/docs/*|*LICENSE*|*.png|*.jpg|*.jpeg|*.gif|*.svg|*.ico) return 1 ;;
+              *) return 0 ;;
+            esac
+          }
+
+          INCLUDE=""
+          for DF in "${DFILES[@]}"; do
+            DIR=$(dirname "$DF")
+            # Component name = path under the app folder, slashes -> dashes.
+            REL="${DIR#$APP_DIR/}"
+            if [ "$REL" = "$DIR" ]; then COMP="app"; else COMP=$(echo "$REL" | tr '/' '-'); fi
+
+            BUILD_THIS="$BUILD_ALL"
+            if [ "$BUILD_ALL" != "true" ]; then
+              while IFS= read -r f; do
+                [ -z "$f" ] && continue
+                case "$f" in
+                  "$DIR"/*) if is_code "$f"; then BUILD_THIS="true"; break; fi ;;
+                esac
+              done <<< "$CHANGED"
+            fi
+
+            if [ "$BUILD_THIS" = "true" ]; then
+              echo "🧩 $COMP ($DIR) -> will build"
+              if [ -n "$INCLUDE" ]; then INCLUDE="$INCLUDE,"; fi
+              INCLUDE="$INCLUDE{\"component\":\"$COMP\",\"context\":\"$DIR\",\"dockerfile\":\"$DF\"}"
+            else
+              echo "⏭️  $COMP ($DIR) -> unchanged, skipping"
+            fi
+          done
+
+          if [ -z "$INCLUDE" ]; then
+            echo "✅ No code changes detected in any component."
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "matrix={\"include\":[$INCLUDE]}" >> "$GITHUB_OUTPUT"
+
+  # ==========================================================================
+  # 2. Build, test, scan & push each changed component
+  # ==========================================================================
+  build:
+    name: ${{ matrix.component }}
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------
+      # Detect language from marker files in the component's context
+      # ----------------------------------------------------------------
+      - name: Detect language
+        id: detect
+        run: |
+          CTX="${{ matrix.context }}"
+          echo "🔍 Inspecting '$CTX' to detect language..."
+
+          if [ -f "$CTX/package.json" ]; then
+            LANG="node"
+          elif [ -f "$CTX/requirements.txt" ] || [ -f "$CTX/pyproject.toml" ] || [ -f "$CTX/setup.py" ]; then
+            LANG="python"
+          elif [ -f "$CTX/go.mod" ]; then
+            LANG="go"
+          elif [ -f "$CTX/pom.xml" ]; then
+            LANG="java-maven"
+          elif [ -f "$CTX/build.gradle" ] || [ -f "$CTX/build.gradle.kts" ]; then
+            LANG="java-gradle"
+          elif [ -f "$CTX/Cargo.toml" ]; then
+            LANG="rust"
+          elif ls "$CTX"/*.csproj >/dev/null 2>&1; then
+            LANG="dotnet"
+          else
+            LANG="unknown"
+          fi
+
+          echo "✅ Detected language: $LANG"
+          echo "language=$LANG" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------
+      # Language-specific setup + install + lint + test
+      # ----------------------------------------------------------------
+      # ----- Node.js -----
+      - name: Setup Node.js
+        if: steps.detect.outputs.language == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Node - install / lint / test
+        if: steps.detect.outputs.language == 'node'
+        working-directory: ${{ matrix.context }}
+        run: |
+          set -e
+          echo "📦 Installing dependencies..."
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          echo "🧹 Linting..."
+          npm run lint --if-present
+          echo "🧪 Running unit tests..."
+          if npm run | grep -q " test:ci"; then
+            npm run test:ci
+          elif npm run | grep -q " test"; then
+            npm test --if-present
+          else
+            echo "No test script defined - skipping."
+          fi
+
+      - name: Node - integration tests
+        if: steps.detect.outputs.language == 'node' && inputs.run_integration_tests
+        working-directory: ${{ matrix.context }}
+        run: |
+          echo "🔗 Running integration tests..."
+          npm run test:integration --if-present
+
+      # ----- Python -----
+      - name: Setup Python
+        if: steps.detect.outputs.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python - install / lint / test
+        if: steps.detect.outputs.language == 'python'
+        working-directory: ${{ matrix.context }}
+        run: |
+          set -e
+          echo "📦 Installing dependencies..."
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          if [ -f pyproject.toml ]; then pip install -e . || true; fi
+          pip install ruff pytest
+          echo "🧹 Linting with ruff..."
+          ruff check . || echo "⚠️  Lint warnings (non-blocking)."
+          echo "🧪 Running unit tests..."
+          if ls tests/ test/ *_test.py test_*.py >/dev/null 2>&1; then
+            pytest -q --ignore=tests/integration || pytest -q
+          else
+            echo "No tests found - skipping."
+          fi
+
+      - name: Python - integration tests
+        if: steps.detect.outputs.language == 'python' && inputs.run_integration_tests
+        working-directory: ${{ matrix.context }}
+        run: |
+          echo "🔗 Running integration tests..."
+          if [ -d tests/integration ]; then pytest -q tests/integration; else echo "No integration tests dir."; fi
+
+      # ----- Go -----
+      - name: Setup Go
+        if: steps.detect.outputs.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Go - build / vet / test
+        if: steps.detect.outputs.language == 'go'
+        working-directory: ${{ matrix.context }}
+        run: |
+          set -e
+          go mod download
+          go vet ./...
+          go test ./... -v
+
+      # ----- Java -----
+      - name: Setup JDK
+        if: steps.detect.outputs.language == 'java-maven' || steps.detect.outputs.language == 'java-gradle'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Maven - verify
+        if: steps.detect.outputs.language == 'java-maven'
+        working-directory: ${{ matrix.context }}
+        run: mvn -B verify
+
+      - name: Gradle - build
+        if: steps.detect.outputs.language == 'java-gradle'
+        working-directory: ${{ matrix.context }}
+        run: ./gradlew build
+
+      # ----- .NET -----
+      - name: Setup .NET
+        if: steps.detect.outputs.language == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: .NET - restore / build / test
+        if: steps.detect.outputs.language == 'dotnet'
+        working-directory: ${{ matrix.context }}
+        run: |
+          set -e
+          dotnet restore
+          dotnet build --no-restore -c Release
+          dotnet test --no-build -c Release
+
+      - name: Warn on unknown language
+        if: steps.detect.outputs.language == 'unknown'
+        run: |
+          echo "⚠️  Could not detect a known language in '${{ matrix.context }}'."
+          echo "    Skipping lint/test. The image will still be built from the Dockerfile."
+
+      # ----------------------------------------------------------------
+      # AWS / ECR auth + resolve version
+      # ----------------------------------------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE }}
+          role-session-name: GitHubActions-${{ env.APP_NAME }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get AWS Account ID
+        id: account-id
+        run: echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve version
+        id: version
+        run: |
+          IMAGE_PREFIX="${{ env.APP_NAME }}-${{ matrix.component }}"
+          REGISTRY="${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
+          INPUT_VERSION="${{ inputs.version }}"
+
+          if [ -n "$INPUT_VERSION" ]; then
+            NEW_VERSION="$INPUT_VERSION"
+            echo "📌 Using explicit version: $NEW_VERSION"
+          else
+            echo "🔍 Checking latest version in ECR for '${IMAGE_PREFIX}'..."
+            VERSIONS=$(aws ecr describe-images \
+              --repository-name "${{ env.ECR_REPOSITORY }}" \
+              --region "${{ env.AWS_REGION }}" \
+              --query 'imageDetails[*].imageTags[]' \
+              --output text 2>/dev/null | tr '\t' '\n' \
+              | grep -E "^${IMAGE_PREFIX}-v[0-9]+\.[0-9]+\.[0-9]+$" \
+              | sed "s/${IMAGE_PREFIX}-v//" || echo "")
+
+            if [ -z "$VERSIONS" ]; then
+              NEW_VERSION="v1.0.0"
+              echo "📌 No previous versions found. Starting at $NEW_VERSION"
+            else
+              LATEST=$(echo "$VERSIONS" | sort -V | tail -n 1)
+              MAJOR=$(echo "$LATEST" | cut -d. -f1)
+              MINOR=$(echo "$LATEST" | cut -d. -f2)
+              PATCH=$(echo "$LATEST" | cut -d. -f3)
+              NEW_VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+              echo "🚀 Auto-incrementing v${LATEST} -> ${NEW_VERSION}"
+            fi
+          fi
+
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${REGISTRY}:${IMAGE_PREFIX}-${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image_latest=${REGISTRY}:${IMAGE_PREFIX}-latest" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------------------------------------------
+      # (Optional) Dependency scan of the SOURCE (filesystem).
+      # Reads lockfiles/manifests directly (package-lock.json,
+      # requirements.txt, go.sum, pom.xml, etc.), so React/npm and other
+      # dependency CVEs are caught even when a multi-stage Dockerfile
+      # discards them from the final image.
+      # ----------------------------------------------------------------
+      - name: Scan dependencies with Trivy (filesystem)
+        if: inputs.run_image_scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: ${{ matrix.context }}
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: ${{ inputs.fail_on_scan && '1' || '0' }}
+          ignore-unfixed: true
+
+      # Upload to Security tab. Non-blocking (continue-on-error) so a report
+      # problem never fails the build; the build gate is exit-code above.
+      - name: Upload dependency scan results to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+          category: trivy-fs-${{ matrix.component }}
+        continue-on-error: true
+
+      # ----------------------------------------------------------------
+      # Build image (load locally so we can scan before pushing)
+      # ----------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          load: true
+          tags: ${{ steps.version.outputs.image_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ----------------------------------------------------------------
+      # (Optional) Vulnerability scan of the built image
+      # ----------------------------------------------------------------
+      - name: Scan image with Trivy
+        if: inputs.run_image_scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.version.outputs.image_tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: ${{ inputs.fail_on_scan && '1' || '0' }}
+          ignore-unfixed: true
+
+      # Upload to Security tab. Non-blocking so it never fails the build.
+      - name: Upload image scan results to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: trivy-image-${{ matrix.component }}
+        continue-on-error: true
+
+      # ----------------------------------------------------------------
+      # Push version + latest tags to ECR
+      # ----------------------------------------------------------------
+      - name: Push to ECR
+        run: |
+          echo "⬆️  Pushing versioned image..."
+          docker push "${{ steps.version.outputs.image_tag }}"
+          echo "🏷️  Tagging + pushing latest..."
+          docker tag "${{ steps.version.outputs.image_tag }}" "${{ steps.version.outputs.image_latest }}"
+          docker push "${{ steps.version.outputs.image_latest }}"
+          echo "✅ Pushed:"
+          echo "   - ${{ steps.version.outputs.image_tag }}"
+          echo "   - ${{ steps.version.outputs.image_latest }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "## 🐳 ${{ env.APP_NAME }}-${{ matrix.component }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Language | \`${{ steps.detect.outputs.language }}\` |"
+            echo "| Version | \`${{ steps.version.outputs.version }}\` |"
+            echo "| Image | \`${{ env.APP_NAME }}-${{ matrix.component }}-${{ steps.version.outputs.version }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

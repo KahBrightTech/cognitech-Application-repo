@@ -1,4 +1,4 @@
-name: Deploy with Helm
+name: Deploy Applicationwith Helm
 
 # =============================================================================
 # Generic Helm-based deploy workflow. Deploys a chart that follows the
@@ -76,13 +76,38 @@ on:
         required: false
         type: boolean
         default: false
+      aws_region:
+        description: 'AWS region'
+        required: false
+        type: string
+        default: 'us-east-1'
+      ecr_repository:
+        description: 'ECR repository name'
+        required: false
+        type: string
+        default: 'int-production-use1-ecs'
+      image_registry:
+        description: 'ECR registry host (account.dkr.ecr.<region>.amazonaws.com)'
+        required: false
+        type: string
+        default: '271457809232.dkr.ecr.us-east-1.amazonaws.com'
+      eks_cluster:
+        description: 'Target EKS cluster name'
+        required: false
+        type: string
+        default: 'int-production-use1-prod-novutech-eks-cluster'
+      iam_role:
+        description: 'IAM role ARN to assume via OIDC'
+        required: false
+        type: string
+        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
 
 env:
-  AWS_REGION: us-east-1
-  ECR_REPOSITORY: int-production-use1-ecs
-  IMAGE_REGISTRY: 271457809232.dkr.ecr.us-east-1.amazonaws.com
-  EKS_CLUSTER_NAME: int-production-use1-prod-novutech-eks-cluster
-  IAM_ROLE: arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role
+  AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+  ECR_REPOSITORY: ${{ inputs.ecr_repository || 'int-production-use1-ecs' }}
+  IMAGE_REGISTRY: ${{ inputs.image_registry || '271457809232.dkr.ecr.us-east-1.amazonaws.com' }}
+  EKS_CLUSTER_NAME: ${{ inputs.eks_cluster || 'int-production-use1-prod-novutech-eks-cluster' }}
+  IAM_ROLE: ${{ inputs.iam_role || 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role' }}
 
 permissions:
   id-token: write

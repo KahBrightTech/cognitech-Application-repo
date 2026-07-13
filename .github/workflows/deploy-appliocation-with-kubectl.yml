@@ -1,4 +1,4 @@
-name: Deploy to EKS
+name: Deploy application with kubectl
 
 # =============================================================================
 # Generic, reusable deploy-to-EKS workflow. Works for ANY app that keeps its
@@ -40,7 +40,12 @@ on:
         type: string
         default: '271457809232.dkr.ecr.us-east-1.amazonaws.com/int-production-use1-ecs'
       components:
-        description: 'Comma-separated components to verify in ECR (e.g. "backend,frontend"). Empty = skip verify.'
+        description: 'Comma-separated components to deploy, e.g. "backend,frontend" or "api,worker,web". Empty = deploy everything in the manifests folder.'
+        required: false
+        type: string
+        default: ''
+      tag_overrides:
+        description: 'Optional explicit image tags per component as comma-separated component=tag pairs (e.g. "backend=myapp-backend-v1.2.3,worker=myapp-worker-v2"). Empty = derive <app>-<component>-<version>.'
         required: false
         type: string
         default: ''
@@ -50,18 +55,22 @@ on:
         type: string
         default: 'deploy'
       aws_region:
+        description: 'AWS region'
         required: false
         type: string
         default: 'us-east-1'
       ecr_repository:
+        description: 'ECR repository name'
         required: false
         type: string
         default: 'int-production-use1-ecs'
       eks_cluster:
+        description: 'Target EKS cluster name'
         required: false
         type: string
         default: 'int-production-use1-prod-novutech-eks-cluster'
       iam_role:
+        description: 'IAM role ARN to assume via OIDC'
         required: false
         type: string
         default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
@@ -94,10 +103,15 @@ on:
         type: string
         default: '271457809232.dkr.ecr.us-east-1.amazonaws.com/int-production-use1-ecs'
       components:
-        description: 'Comma-separated components to verify in ECR (e.g. "backend,frontend"). Empty = skip verify.'
+        description: 'Comma-separated components to deploy, e.g. "backend,frontend" or "api,worker,web". Empty = deploy everything in the manifests folder.'
         required: false
         type: string
-        default: 'backend,frontend'
+        default: ''
+      tag_overrides:
+        description: 'Optional explicit image tags per component as comma-separated component=tag pairs (e.g. "backend=myapp-backend-v1.2.3"). Empty = derive <app>-<component>-<version>.'
+        required: false
+        type: string
+        default: ''
       action:
         description: 'Deploy or delete'
         required: true
@@ -106,6 +120,26 @@ on:
           - deploy
           - delete
         default: deploy
+      aws_region:
+        description: 'AWS region'
+        required: false
+        type: string
+        default: 'us-east-1'
+      ecr_repository:
+        description: 'ECR repository name'
+        required: false
+        type: string
+        default: 'int-production-use1-ecs'
+      eks_cluster:
+        description: 'Target EKS cluster name'
+        required: false
+        type: string
+        default: 'int-production-use1-prod-novutech-eks-cluster'
+      iam_role:
+        description: 'IAM role ARN to assume via OIDC'
+        required: false
+        type: string
+        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
 
 env:
   AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
@@ -141,11 +175,19 @@ jobs:
       - name: Verify images exist in ECR
         if: inputs.action == 'deploy' && inputs.components != ''
         run: |
+          # Explicit tag overrides (component=tag pairs).
+          declare -A OVERRIDE
+          IFS=',' read -ra PAIRS <<< "${{ inputs.tag_overrides }}"
+          for p in "${PAIRS[@]}"; do
+            p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
+            OVERRIDE["${p%%=*}"]="${p#*=}"
+          done
+
           IFS=',' read -ra COMPS <<< "${{ inputs.components }}"
           for COMPONENT in "${COMPS[@]}"; do
-            COMPONENT="$(echo "$COMPONENT" | xargs)"   # trim spaces
-            [ -z "$COMPONENT" ] && continue
-            TAG="${{ inputs.app_name }}-${COMPONENT}-${{ inputs.version }}"
+            COMPONENT="$(echo "$COMPONENT" | xargs)"; [ -z "$COMPONENT" ] && continue
+            TAG="${OVERRIDE[$COMPONENT]:-}"
+            [ -z "$TAG" ] && TAG="${{ inputs.app_name }}-${COMPONENT}-${{ inputs.version }}"
             echo "🔍 Checking for tag: $TAG"
             aws ecr describe-images \
               --repository-name "${{ env.ECR_REPOSITORY }}" \
@@ -166,17 +208,49 @@ jobs:
           VERSION="${{ inputs.version }}"
           REGISTRY="${{ inputs.image_registry }}"
           SRC="${{ inputs.manifests_path }}"
+          APP="${{ inputs.app_name }}"
 
           if [ ! -d "$SRC" ]; then echo "❌ Manifests folder '$SRC' not found."; exit 1; fi
 
+          # Requested components (whitelist). Empty list = deploy everything.
+          declare -A KEEP; FILTER=false
+          IFS=',' read -ra COMPS <<< "${{ inputs.components }}"
+          for c in "${COMPS[@]}"; do c="$(echo "$c" | xargs)"; [ -n "$c" ] && { KEEP["$c"]=1; FILTER=true; }; done
+
+          # Explicit tag overrides (component=tag pairs).
+          declare -A OVERRIDE
+          IFS=',' read -ra PAIRS <<< "${{ inputs.tag_overrides }}"
+          for p in "${PAIRS[@]}"; do p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue; OVERRIDE["${p%%=*}"]="${p#*=}"; done
+
+          if [ "$FILTER" = "true" ]; then echo "🧩 Deploying components: ${!KEEP[*]}"; else echo "🧩 Deploying ALL components in '$SRC'"; fi
+
           mkdir -p rendered
-          echo "🧾 Rendering manifests from '$SRC' (registry=$REGISTRY, version=$VERSION, namespace=$NS)..."
+          echo "🧾 Rendering manifests from '$SRC' (registry=$REGISTRY, namespace=$NS)..."
           for f in $(find "$SRC" -type f \( -name '*.yaml' -o -name '*.yml' \) | sort); do
-            # Inject the templated values into every manifest.
-            sed -e "s#__REGISTRY__#${REGISTRY}#g" \
-                -e "s#__VERSION__#${VERSION}#g" \
-                -e "s#__NAMESPACE__#${NS}#g" \
-                "$f" > "rendered/$(basename "$f")"
+            # Which components does this file reference? (from <app>-<comp>-__VERSION__ image tokens)
+            FILE_COMPS=$(grep -oE "${APP}-[a-zA-Z0-9_-]+-__VERSION__" "$f" 2>/dev/null \
+              | sed -E "s/^${APP}-(.*)-__VERSION__$/\1/" | sort -u)
+
+            # Shared manifests (no component image, e.g. configmap/namespace/ingress)
+            # are always applied. Component manifests are applied only when selected.
+            if [ -n "$FILE_COMPS" ] && [ "$FILTER" = "true" ]; then
+              KEEP_FILE=false
+              for c in $FILE_COMPS; do [ -n "${KEEP[$c]:-}" ] && KEEP_FILE=true; done
+              if [ "$KEEP_FILE" != "true" ]; then
+                echo "⏭️  Skipping $(basename "$f") (components '$FILE_COMPS' not selected)"; continue
+              fi
+            fi
+
+            # Build sed args: registry + namespace, then per-component tag
+            # overrides, then the generic __VERSION__ fallback (which yields
+            # <app>-<comp>-<version> for any component without an override).
+            SED_ARGS=(-e "s#__REGISTRY__#${REGISTRY}#g" -e "s#__NAMESPACE__#${NS}#g")
+            for c in $FILE_COMPS; do
+              OT="${OVERRIDE[$c]:-}"
+              [ -n "$OT" ] && SED_ARGS+=(-e "s#${APP}-${c}-__VERSION__#${OT}#g")
+            done
+            SED_ARGS+=(-e "s#__VERSION__#${VERSION}#g")
+            sed "${SED_ARGS[@]}" "$f" > "rendered/$(basename "$f")"
           done
 
           echo "🚀 Applying to namespace '$NS'..."
@@ -199,6 +273,8 @@ jobs:
           REGISTRY="${{ inputs.image_registry }}"
           SRC="${{ inputs.manifests_path }}"
           echo "🗑️  Deleting manifests in '$SRC' from namespace '$NS'..."
+          # Image tags are irrelevant for deletion (resources match by kind/name),
+          # so a plain generic render is enough here.
           mkdir -p rendered
           for f in $(find "$SRC" -type f \( -name '*.yaml' -o -name '*.yml' \) | sort); do
             sed -e "s#__REGISTRY__#${REGISTRY}#g" \
