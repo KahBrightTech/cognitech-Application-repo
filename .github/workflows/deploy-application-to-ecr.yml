@@ -1,4 +1,4 @@
-name: Deploy Application to ECR
+name: Deploy-application-to-ECR
 
 # =============================================================================
 # Generic, reusable CI pipeline for ANY app in this repo.

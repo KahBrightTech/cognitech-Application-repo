@@ -1,4 +1,4 @@
-name: Deploy Applicationwith Helm
+name: Deploy-application-with-helm
 
 # =============================================================================
 # Generic Helm-based deploy workflow. Deploys a chart that follows the
