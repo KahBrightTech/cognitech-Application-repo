@@ -1,0 +1,3 @@
+Little Doctor Academy - Updated Hospital Stories Edition
+Build: 2026-07-14-v2
+Includes: Nurse -> Doctor -> Diagnosis -> Pharmacist scenarios
