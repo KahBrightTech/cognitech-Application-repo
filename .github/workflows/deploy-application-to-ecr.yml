@@ -1,78 +1,46 @@
 name: Deploy-application-to-ECR
 
 # =============================================================================
-# Generic, reusable CI pipeline for ANY app in this repo.
-# Auto-detects each component's language, lints, tests, builds a Docker
-# image, scans it (source + image), and pushes a new version (+ latest)
-# to ECR. It does NOT deploy to EKS.
+# Multi-app CI pipeline for ALL apps in this repo.
+# On every push to main it AUTO-DISCOVERS apps: every top-level folder
+# (except the excluded ones) containing a Dockerfile is an app; every
+# directory holding a Dockerfile is a buildable component.
+# For each CHANGED component it detects the language, lints, tests, builds
+# a Docker image, scans it (source + image), and pushes a new version
+# (+ latest) to ECR. It does NOT deploy to EKS.
 #
-# It is app-agnostic: the ONLY app-specific values are the `app_name`
-# (image tag prefix) and `app_dir` (folder to build) inputs.
+# Adding a new app requires ZERO workflow changes: create the folder with a
+# Dockerfile and push. Images are tagged <app>-<component>-vX.Y.Z where
+# <app> is the lowercased top-level folder name.
 #
-# Because `push:`/`paths:` filters cannot live in a reusable workflow, each
-# app has a tiny caller (e.g. deploy-pulseboard.yml) that owns the trigger
-# and does: `uses: ./.github/workflows/ci-build-push.yml`.
+# workflow_dispatch builds everything (or one app via `app_filter`).
 # =============================================================================
 
 on:
-  workflow_call:
-    inputs:
-      app_name:
-        description: 'App name / image tag prefix, e.g. pulseboard'
-        required: true
-        type: string
-      app_dir:
-        description: 'Folder to build, e.g. PulseBoard'
-        required: true
-        type: string
-      run_integration_tests:
-        description: 'Run integration tests if present'
-        required: false
-        type: boolean
-        default: true
-      run_image_scan:
-        description: 'Scan the built image with Trivy'
-        required: false
-        type: boolean
-        default: true
-      fail_on_scan:
-        description: 'Fail the build if CRITICAL/HIGH vulnerabilities are found'
-        required: false
-        type: boolean
-        default: false
-      version:
-        description: 'Explicit version tag (e.g. v1.2.3). Empty = auto-increment from ECR'
-        required: false
-        type: string
-        default: ''
-      aws_region:
-        description: 'AWS region'
-        required: false
-        type: string
-        default: 'us-east-1'
-      ecr_repository:
-        description: 'ECR repository name'
-        required: false
-        type: string
-        default: 'int-production-use1-ecs'
-      iam_role:
-        description: 'IAM role ARN to assume via OIDC'
-        required: false
-        type: string
-        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.markdown'
+      - '**/*.rst'
+      - '**/*.adoc'
+      - '**/LICENSE*'
+      - '**/docs/**'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.jpeg'
+      - '**/*.gif'
+      - '**/*.svg'
+      - '**/*.ico'
 
   workflow_dispatch:
     inputs:
-      app_name:
-        description: 'App name / image tag prefix, e.g. pulseboard'
-        required: true
+      app_filter:
+        description: 'Only build this app (top-level folder name, e.g. PulseBoard). Empty = all apps'
+        required: false
         type: string
-        default: 'pulseboard'
-      app_dir:
-        description: 'Folder to build, e.g. PulseBoard'
-        required: true
-        type: string
-        default: 'PulseBoard'
+        default: ''
       run_integration_tests:
         description: 'Run integration tests if present'
         type: boolean
@@ -106,10 +74,10 @@ on:
         default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
 
 env:
-  APP_NAME: ${{ inputs.app_name }}
-  AWS_REGION: ${{ inputs.aws_region }}
-  ECR_REPOSITORY: ${{ inputs.ecr_repository }}
-  IAM_ROLE: ${{ inputs.iam_role }}
+  # inputs.* is empty on push events -> fall back to the defaults
+  AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+  ECR_REPOSITORY: ${{ inputs.ecr_repository || 'int-production-use1-ecs' }}
+  IAM_ROLE: ${{ inputs.iam_role || 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role' }}
 
 permissions:
   id-token: write
@@ -118,10 +86,10 @@ permissions:
 
 jobs:
   # ==========================================================================
-  # 1. Detect which components changed (code only) and build a dynamic matrix
+  # 1. Discover apps/components repo-wide and detect which ones changed
   # ==========================================================================
   changes:
-    name: Detect changed components
+    name: Discover apps & detect changes
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
@@ -132,17 +100,23 @@ jobs:
         with:
           fetch-depth: 0   # need history so we can diff against the previous commit
 
-      - name: Discover components & detect changes
+      - name: Discover apps & detect changes
         id: set
         run: |
           set -e
-          APP_DIR="${{ inputs.app_dir }}"   # 👈 the only app-specific value in this job
+          APP_FILTER="${{ inputs.app_filter }}"
+          EXCLUDE_DIRS="Archives"   # top-level folders that are never built
 
-          # --- Auto-discover components: every directory with a Dockerfile ---
-          mapfile -t DFILES < <(find "$APP_DIR" -type f -iname 'Dockerfile' | sort)
+          # --- Auto-discover: every directory with a Dockerfile is a component;
+          #     its top-level folder is the app. ---
+          mapfile -t DFILES < <(find . -type f -iname 'Dockerfile' \
+            -not -path '*/node_modules/*' \
+            -not -path './.git/*' \
+            -not -path './.github/*' \
+            | sed 's|^\./||' | sort)
 
           if [ ${#DFILES[@]} -eq 0 ]; then
-            echo "❌ No Dockerfile found under '$APP_DIR'. Nothing to build."
+            echo "❌ No Dockerfile found anywhere. Nothing to build."
             echo "any=false" >> "$GITHUB_OUTPUT"
             echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
             exit 0
@@ -174,10 +148,30 @@ jobs:
 
           INCLUDE=""
           for DF in "${DFILES[@]}"; do
+            # Skip a Dockerfile sitting at the repo root - apps live in folders.
+            case "$DF" in */*) ;; *) continue ;; esac
+
+            TOP="${DF%%/*}"
+
+            # Skip excluded top-level folders (archives etc.)
+            SKIP="false"
+            for EX in $EXCLUDE_DIRS; do
+              if [ "$TOP" = "$EX" ]; then SKIP="true"; break; fi
+            done
+            [ "$SKIP" = "true" ] && continue
+
+            APP=$(echo "$TOP" | tr '[:upper:]' '[:lower:]')
+
+            # Optional single-app filter (workflow_dispatch)
+            if [ -n "$APP_FILTER" ]; then
+              FILTER=$(echo "$APP_FILTER" | tr '[:upper:]' '[:lower:]')
+              [ "$APP" != "$FILTER" ] && continue
+            fi
+
             DIR=$(dirname "$DF")
             # Component name = path under the app folder, slashes -> dashes.
-            REL="${DIR#$APP_DIR/}"
-            if [ "$REL" = "$DIR" ]; then COMP="app"; else COMP=$(echo "$REL" | tr '/' '-'); fi
+            REL="${DIR#$TOP}"; REL="${REL#/}"
+            if [ -z "$REL" ]; then COMP="app"; else COMP=$(echo "$REL" | tr '/' '-' | tr '[:upper:]' '[:lower:]'); fi
 
             BUILD_THIS="$BUILD_ALL"
             if [ "$BUILD_ALL" != "true" ]; then
@@ -190,11 +184,11 @@ jobs:
             fi
 
             if [ "$BUILD_THIS" = "true" ]; then
-              echo "🧩 $COMP ($DIR) -> will build"
+              echo "🧩 $APP/$COMP ($DIR) -> will build"
               if [ -n "$INCLUDE" ]; then INCLUDE="$INCLUDE,"; fi
-              INCLUDE="$INCLUDE{\"component\":\"$COMP\",\"context\":\"$DIR\",\"dockerfile\":\"$DF\"}"
+              INCLUDE="$INCLUDE{\"app\":\"$APP\",\"component\":\"$COMP\",\"context\":\"$DIR\",\"dockerfile\":\"$DF\"}"
             else
-              echo "⏭️  $COMP ($DIR) -> unchanged, skipping"
+              echo "⏭️  $APP/$COMP ($DIR) -> unchanged, skipping"
             fi
           done
 
@@ -207,10 +201,10 @@ jobs:
           echo "matrix={\"include\":[$INCLUDE]}" >> "$GITHUB_OUTPUT"
 
   # ==========================================================================
-  # 2. Build, test, scan & push each changed component
+  # 2. Build, test, scan & push each changed component of each changed app
   # ==========================================================================
   build:
-    name: ${{ matrix.component }}
+    name: ${{ matrix.app }}-${{ matrix.component }}
     needs: changes
     if: needs.changes.outputs.any == 'true'
     runs-on: ubuntu-latest
@@ -280,7 +274,7 @@ jobs:
           fi
 
       - name: Node - integration tests
-        if: steps.detect.outputs.language == 'node' && inputs.run_integration_tests
+        if: steps.detect.outputs.language == 'node' && (github.event_name != 'workflow_dispatch' || inputs.run_integration_tests)
         working-directory: ${{ matrix.context }}
         run: |
           echo "🔗 Running integration tests..."
@@ -314,7 +308,7 @@ jobs:
           fi
 
       - name: Python - integration tests
-        if: steps.detect.outputs.language == 'python' && inputs.run_integration_tests
+        if: steps.detect.outputs.language == 'python' && (github.event_name != 'workflow_dispatch' || inputs.run_integration_tests)
         working-directory: ${{ matrix.context }}
         run: |
           echo "🔗 Running integration tests..."
@@ -383,7 +377,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.IAM_ROLE }}
-          role-session-name: GitHubActions-${{ env.APP_NAME }}-${{ github.run_id }}
+          role-session-name: GitHubActions-${{ matrix.app }}-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -396,7 +390,7 @@ jobs:
       - name: Resolve version
         id: version
         run: |
-          IMAGE_PREFIX="${{ env.APP_NAME }}-${{ matrix.component }}"
+          IMAGE_PREFIX="${{ matrix.app }}-${{ matrix.component }}"
           REGISTRY="${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
           INPUT_VERSION="${{ inputs.version }}"
 
@@ -438,7 +432,7 @@ jobs:
       # discards them from the final image.
       # ----------------------------------------------------------------
       - name: Scan dependencies with Trivy (filesystem)
-        if: inputs.run_image_scan
+        if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
@@ -446,7 +440,7 @@ jobs:
           format: 'sarif'
           output: 'trivy-fs-results.sarif'
           severity: 'CRITICAL,HIGH'
-          exit-code: ${{ inputs.fail_on_scan && '1' || '0' }}
+          exit-code: ${{ (github.event_name == 'workflow_dispatch' && inputs.fail_on_scan) && '1' || '0' }}
           ignore-unfixed: true
 
       # Upload to Security tab. Non-blocking (continue-on-error) so a report
@@ -456,7 +450,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-fs-results.sarif'
-          category: trivy-fs-${{ matrix.component }}
+          category: trivy-fs-${{ matrix.app }}-${{ matrix.component }}
         continue-on-error: true
 
       # ----------------------------------------------------------------
@@ -479,14 +473,14 @@ jobs:
       # (Optional) Vulnerability scan of the built image
       # ----------------------------------------------------------------
       - name: Scan image with Trivy
-        if: inputs.run_image_scan
+        if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.version.outputs.image_tag }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-          exit-code: ${{ inputs.fail_on_scan && '1' || '0' }}
+          exit-code: ${{ (github.event_name == 'workflow_dispatch' && inputs.fail_on_scan) && '1' || '0' }}
           ignore-unfixed: true
 
       # Upload to Security tab. Non-blocking so it never fails the build.
@@ -495,7 +489,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
-          category: trivy-image-${{ matrix.component }}
+          category: trivy-image-${{ matrix.app }}-${{ matrix.component }}
         continue-on-error: true
 
       # ----------------------------------------------------------------
@@ -515,11 +509,12 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "## 🐳 ${{ env.APP_NAME }}-${{ matrix.component }}"
+            echo "## 🐳 ${{ matrix.app }}-${{ matrix.component }}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
+            echo "| App | \`${{ matrix.app }}\` |"
             echo "| Language | \`${{ steps.detect.outputs.language }}\` |"
             echo "| Version | \`${{ steps.version.outputs.version }}\` |"
-            echo "| Image | \`${{ env.APP_NAME }}-${{ matrix.component }}-${{ steps.version.outputs.version }}\` |"
+            echo "| Image | \`${{ matrix.app }}-${{ matrix.component }}-${{ steps.version.outputs.version }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
