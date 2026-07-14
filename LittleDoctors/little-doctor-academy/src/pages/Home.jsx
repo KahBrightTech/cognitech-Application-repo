@@ -26,7 +26,7 @@ export default function Home({ doctors, lessons, onNavigate, onSelectCharacter, 
           <div className="hero-orbit orbit-one">🩺</div>
           <div className="hero-orbit orbit-two">🩹</div>
           <div className="hero-orbit orbit-three">🌡️</div>
-          <div className="doctor-portrait">👩🏽‍⚕️</div>
+          <img className="doctor-portrait-image" src="/assets/characters/dr-mia.webp" alt="Dr. Mia" />
           <div className="speech-bubble">Welcome, Doctor! Ready to help a patient?</div>
         </div>
       </section>

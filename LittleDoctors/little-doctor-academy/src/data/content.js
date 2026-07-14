@@ -1,16 +1,16 @@
 export const doctors = [
-  { id: "mia", name: "Dr. Mia", role: "Pediatrician", emoji: "👩🏽‍⚕️", color: "lavender", message: "I help children feel healthy and strong." },
-  { id: "alex", name: "Dr. Alex", role: "Surgeon", emoji: "👨🏿‍⚕️", color: "mint", message: "I carefully fix problems inside the body." },
-  { id: "bella", name: "Nurse Bella", role: "Nurse", emoji: "👩🏼‍⚕️", color: "peach", message: "I check vital signs and help patients feel safe." },
-  { id: "sam", name: "Dr. Sam", role: "Dentist", emoji: "🧑🏻‍⚕️", color: "sky", message: "I help keep teeth clean and healthy." },
-  { id: "zoe", name: "Dr. Zoe", role: "Veterinarian", emoji: "👩🏾‍⚕️", color: "rose", message: "I care for animals when they are sick." }
+  { id: "mia", name: "Dr. Mia", role: "Pediatrician", image: "/assets/characters/dr-mia.webp", color: "lavender", message: "I help children feel healthy and strong." },
+  { id: "alex", name: "Dr. Alex", role: "Surgeon", image: "/assets/characters/dr-alex.webp", color: "mint", message: "I carefully fix problems inside the body." },
+  { id: "bella", name: "Nurse Bella", role: "Nurse", image: "/assets/characters/nurse-bella.webp", color: "peach", message: "I check vital signs and help patients feel safe." },
+  { id: "sam", name: "Dr. Sam", role: "Dentist", image: "/assets/characters/dr-sam.webp", color: "sky", message: "I help keep teeth clean and healthy." },
+  { id: "zoe", name: "Dr. Zoe", role: "Veterinarian", image: "/assets/characters/dr-zoe.webp", color: "rose", message: "I care for animals when they are sick." }
 ];
 
 export const patients = [
-  { id: "lily", name: "Lily", age: 6, emoji: "👧🏻", symptom: "Cough and sore throat", level: "Beginner" },
-  { id: "ethan", name: "Ethan", age: 8, emoji: "👦🏿", symptom: "Scraped knee", level: "Beginner" },
-  { id: "noah", name: "Noah", age: 5, emoji: "👦🏻", symptom: "Tummy ache", level: "Intermediate" },
-  { id: "emma", name: "Emma", age: 7, emoji: "👧🏼", symptom: "Twisted ankle", level: "Intermediate" }
+  { id: "lily", name: "Lily", age: 6, image: "/assets/characters/lily.webp", symptom: "Cough and sore throat", level: "Beginner" },
+  { id: "ethan", name: "Ethan", age: 8, image: "/assets/characters/ethan.webp", symptom: "Scraped knee", level: "Beginner" },
+  { id: "noah", name: "Noah", age: 5, image: "/assets/characters/noah.webp", symptom: "Tummy ache", level: "Intermediate" },
+  { id: "emma", name: "Emma", age: 7, image: "/assets/characters/emma.webp", symptom: "Twisted ankle", level: "Intermediate" }
 ];
 
 export const lessons = [
