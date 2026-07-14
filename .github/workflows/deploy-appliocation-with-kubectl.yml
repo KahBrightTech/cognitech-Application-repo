@@ -8,93 +8,9 @@ name: Deploy application with kubectl
 # It does NOT build images - it deploys a version already in ECR.
 # Pod/Deployment ordering (e.g. backend before frontend) should be handled
 # inside the manifests via initContainers or readiness probes.
-#
-# Run it two ways:
-#   1. Manually (Actions -> Deploy to EKS -> Run workflow), or
-#   2. From another workflow via `uses: ./.github/workflows/deploy-to-eks.yml`.
 # =============================================================================
 
 on:
-  workflow_call:
-    inputs:
-      app_name:
-        description: 'App name / image tag prefix, e.g. pulseboard'
-        required: true
-        type: string
-      manifests_path:
-        description: 'Folder containing the k8s manifests, e.g. PulseBoard/k8s'
-        required: true
-        type: string
-      namespace:
-        description: 'Target namespace (must already exist)'
-        required: true
-        type: string
-      version:
-        description: 'Image version to deploy (e.g. v1.0.3) or "latest"'
-        required: false
-        type: string
-        default: 'latest'
-      image_registry:
-        description: 'Full ECR image path (registry/repo), injected as __REGISTRY__'
-        required: false
-        type: string
-        default: '271457809232.dkr.ecr.us-east-1.amazonaws.com/int-production-use1-ecs'
-      components:
-        description: 'Comma-separated components to deploy, e.g. "backend,frontend" or "api,worker,web". Empty = deploy everything in the manifests folder.'
-        required: false
-        type: string
-        default: ''
-      tag_overrides:
-        description: 'Optional explicit image tags per component as comma-separated component=tag pairs (e.g. "backend=myapp-backend-v1.2.3,worker=myapp-worker-v2"). Empty = derive <app>-<component>-<version>.'
-        required: false
-        type: string
-        default: ''
-      include_backend:
-        description: 'Deploy the backend component'
-        required: false
-        type: boolean
-        default: true
-      backend_tag:
-        description: 'Explicit backend image tag (empty = derive <app>-backend-<version>)'
-        required: false
-        type: string
-        default: ''
-      include_frontend:
-        description: 'Deploy the frontend component'
-        required: false
-        type: boolean
-        default: true
-      frontend_tag:
-        description: 'Explicit frontend image tag (empty = derive <app>-frontend-<version>)'
-        required: false
-        type: string
-        default: ''
-      action:
-        description: 'deploy or delete'
-        required: false
-        type: string
-        default: 'deploy'
-      aws_region:
-        description: 'AWS region'
-        required: false
-        type: string
-        default: 'us-east-1'
-      ecr_repository:
-        description: 'ECR repository name'
-        required: false
-        type: string
-        default: 'int-production-use1-ecs'
-      eks_cluster:
-        description: 'Target EKS cluster name'
-        required: false
-        type: string
-        default: 'int-production-use1-prod-novutech-eks-cluster'
-      iam_role:
-        description: 'IAM role ARN to assume via OIDC'
-        required: false
-        type: string
-        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
-
   workflow_dispatch:
     inputs:
       app_name:
@@ -122,16 +38,6 @@ on:
         required: true
         type: string
         default: '271457809232.dkr.ecr.us-east-1.amazonaws.com/int-production-use1-ecs'
-      components:
-        description: 'Comma-separated components to deploy, e.g. "backend,frontend" or "api,worker,web". Empty = deploy everything in the manifests folder.'
-        required: false
-        type: string
-        default: ''
-      tag_overrides:
-        description: 'Optional explicit image tags per component as comma-separated component=tag pairs (e.g. "backend=myapp-backend-v1.2.3"). Empty = derive <app>-<component>-<version>.'
-        required: false
-        type: string
-        default: ''
       include_backend:
         description: 'Deploy the backend component'
         required: false
@@ -210,54 +116,13 @@ jobs:
         run: aws eks update-kubeconfig --name "${{ env.EKS_CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
 
       # ----------------------------------------------------------------
-      # Resolve components + tag overrides. If the generic `components`
-      # input is empty, derive it from include_backend/include_frontend.
-      # backend_tag/frontend_tag are merged into tag_overrides (component
-      # manifests still fall back to <app>-<component>-<version>).
-      # ----------------------------------------------------------------
-      - name: Resolve components and tag overrides
-        run: |
-          COMPONENTS="${{ inputs.components }}"
-          TAG_OVERRIDES="${{ inputs.tag_overrides }}"
-
-          if [ -z "$COMPONENTS" ]; then
-            PARTS=()
-            [ "${{ inputs.include_backend }}" == "true" ] && PARTS+=("backend")
-            [ "${{ inputs.include_frontend }}" == "true" ] && PARTS+=("frontend")
-            COMPONENTS=$(IFS=,; echo "${PARTS[*]}")
-          fi
-
-          if [ "${{ inputs.include_backend }}" == "true" ] && [ -n "${{ inputs.backend_tag }}" ]; then
-            TAG_OVERRIDES="${TAG_OVERRIDES:+$TAG_OVERRIDES,}backend=${{ inputs.backend_tag }}"
-          fi
-          if [ "${{ inputs.include_frontend }}" == "true" ] && [ -n "${{ inputs.frontend_tag }}" ]; then
-            TAG_OVERRIDES="${TAG_OVERRIDES:+$TAG_OVERRIDES,}frontend=${{ inputs.frontend_tag }}"
-          fi
-
-          echo "🧩 Resolved components: $COMPONENTS"
-          echo "🏷️  Resolved tag overrides: $TAG_OVERRIDES"
-          echo "COMPONENTS=$COMPONENTS" >> "$GITHUB_ENV"
-          echo "TAG_OVERRIDES=$TAG_OVERRIDES" >> "$GITHUB_ENV"
-
-      # ----------------------------------------------------------------
-      # Verify requested version exists in ECR (deploy only, if components given)
+      # Verify the requested images exist in ECR (deploy only)
       # ----------------------------------------------------------------
       - name: Verify images exist in ECR
-        if: inputs.action == 'deploy' && env.COMPONENTS != ''
+        if: inputs.action == 'deploy'
         run: |
-          # Explicit tag overrides (component=tag pairs).
-          declare -A OVERRIDE
-          IFS=',' read -ra PAIRS <<< "$TAG_OVERRIDES"
-          for p in "${PAIRS[@]}"; do
-            p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
-            OVERRIDE["${p%%=*}"]="${p#*=}"
-          done
-
-          IFS=',' read -ra COMPS <<< "$COMPONENTS"
-          for COMPONENT in "${COMPS[@]}"; do
-            COMPONENT="$(echo "$COMPONENT" | xargs)"; [ -z "$COMPONENT" ] && continue
-            TAG="${OVERRIDE[$COMPONENT]:-}"
-            [ -z "$TAG" ] && TAG="${{ inputs.app_name }}-${COMPONENT}-${{ inputs.version }}"
+          check() {
+            local TAG="$1"
             echo "🔍 Checking for tag: $TAG"
             aws ecr describe-images \
               --repository-name "${{ env.ECR_REPOSITORY }}" \
@@ -265,7 +130,15 @@ jobs:
               --image-ids imageTag="$TAG" >/dev/null 2>&1 \
               && echo "   ✅ Found $TAG" \
               || { echo "   ❌ $TAG not found in ECR. Build it first."; exit 1; }
-          done
+          }
+          if [ "${{ inputs.include_backend }}" == "true" ]; then
+            BT="${{ inputs.backend_tag }}"; [ -z "$BT" ] && BT="${{ inputs.app_name }}-backend-${{ inputs.version }}"
+            check "$BT"
+          fi
+          if [ "${{ inputs.include_frontend }}" == "true" ]; then
+            FT="${{ inputs.frontend_tag }}"; [ -z "$FT" ] && FT="${{ inputs.app_name }}-frontend-${{ inputs.version }}"
+            check "$FT"
+          fi
 
       # ----------------------------------------------------------------
       # Render manifests: inject version + namespace, then apply
@@ -282,17 +155,17 @@ jobs:
 
           if [ ! -d "$SRC" ]; then echo "❌ Manifests folder '$SRC' not found."; exit 1; fi
 
-          # Requested components (whitelist). Empty list = deploy everything.
-          declare -A KEEP; FILTER=false
-          IFS=',' read -ra COMPS <<< "$COMPONENTS"
-          for c in "${COMPS[@]}"; do c="$(echo "$c" | xargs)"; [ -n "$c" ] && { KEEP["$c"]=1; FILTER=true; }; done
-
-          # Explicit tag overrides (component=tag pairs).
-          declare -A OVERRIDE
-          IFS=',' read -ra PAIRS <<< "$TAG_OVERRIDES"
-          for p in "${PAIRS[@]}"; do p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue; OVERRIDE["${p%%=*}"]="${p#*=}"; done
-
-          if [ "$FILTER" = "true" ]; then echo "🧩 Deploying components: ${!KEEP[*]}"; else echo "🧩 Deploying ALL components in '$SRC'"; fi
+          # Only set an image tag for components that are included. Each tag
+          # can be provided explicitly, or derived as <app>-<component>-<version>.
+          BT=""; FT=""
+          if [ "${{ inputs.include_backend }}" == "true" ]; then
+            BT="${{ inputs.backend_tag }}"; [ -z "$BT" ] && BT="${APP}-backend-${VERSION}"
+            echo "🧩 backend image tag: $BT"
+          fi
+          if [ "${{ inputs.include_frontend }}" == "true" ]; then
+            FT="${{ inputs.frontend_tag }}"; [ -z "$FT" ] && FT="${APP}-frontend-${VERSION}"
+            echo "🧩 frontend image tag: $FT"
+          fi
 
           mkdir -p rendered
           echo "🧾 Rendering manifests from '$SRC' (registry=$REGISTRY, namespace=$NS)..."
@@ -302,23 +175,24 @@ jobs:
               | sed -E "s/^${APP}-(.*)-__VERSION__$/\1/" | sort -u)
 
             # Shared manifests (no component image, e.g. configmap/namespace/ingress)
-            # are always applied. Component manifests are applied only when selected.
-            if [ -n "$FILE_COMPS" ] && [ "$FILTER" = "true" ]; then
+            # are always applied. Component manifests are applied only when
+            # that component is included.
+            if [ -n "$FILE_COMPS" ]; then
               KEEP_FILE=false
-              for c in $FILE_COMPS; do [ -n "${KEEP[$c]:-}" ] && KEEP_FILE=true; done
+              for c in $FILE_COMPS; do
+                [ "$c" == "backend" ] && [ "${{ inputs.include_backend }}" == "true" ] && KEEP_FILE=true
+                [ "$c" == "frontend" ] && [ "${{ inputs.include_frontend }}" == "true" ] && KEEP_FILE=true
+              done
               if [ "$KEEP_FILE" != "true" ]; then
                 echo "⏭️  Skipping $(basename "$f") (components '$FILE_COMPS' not selected)"; continue
               fi
             fi
 
-            # Build sed args: registry + namespace, then per-component tag
-            # overrides, then the generic __VERSION__ fallback (which yields
-            # <app>-<comp>-<version> for any component without an override).
+            # Build sed args: registry + namespace, then per-component tag,
+            # then the generic __VERSION__ fallback.
             SED_ARGS=(-e "s#__REGISTRY__#${REGISTRY}#g" -e "s#__NAMESPACE__#${NS}#g")
-            for c in $FILE_COMPS; do
-              OT="${OVERRIDE[$c]:-}"
-              [ -n "$OT" ] && SED_ARGS+=(-e "s#${APP}-${c}-__VERSION__#${OT}#g")
-            done
+            [ -n "$BT" ] && SED_ARGS+=(-e "s#${APP}-backend-__VERSION__#${BT}#g")
+            [ -n "$FT" ] && SED_ARGS+=(-e "s#${APP}-frontend-__VERSION__#${FT}#g")
             SED_ARGS+=(-e "s#__VERSION__#${VERSION}#g")
             sed "${SED_ARGS[@]}" "$f" > "rendered/$(basename "$f")"
           done
@@ -376,6 +250,5 @@ jobs:
             echo "| Version | \`${{ inputs.version }}\` |"
             echo "| Namespace | \`${{ inputs.namespace }}\` |"
             echo "| Manifests | \`${{ inputs.manifests_path }}\` |"
-            echo "| Components | \`${{ env.COMPONENTS }}\` |"
             echo "| Cluster | \`${{ env.EKS_CLUSTER_NAME }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
