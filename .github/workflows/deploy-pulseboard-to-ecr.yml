@@ -419,6 +419,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
+          pull: true   # always fetch the latest base image (security patches)
           load: true
           tags: ${{ steps.version.outputs.image_tag }}
           cache-from: type=gha
