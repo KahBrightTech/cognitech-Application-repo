@@ -1,0 +1,71 @@
+name: Deploy-LittleDoctor
+
+# =============================================================================
+# CI/CD pipeline for the LittleDoctor application (LittleDoctorUpdate folder).
+# Triggers ONLY when source code inside LittleDoctorUpdate/ is pushed to main
+# (docs/markdown/images are ignored). Can also be run manually from the
+# Actions tab.
+#
+# All the heavy lifting (language detection, lint, test, Trivy scans, docker
+# build, ECR push + versioning) is done by the shared engine:
+# .github/workflows/deploy-application-to-ecr.yml
+#
+# Images are tagged littledoctor-<component>-vX.Y.Z
+# =============================================================================
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # --- watch the app folder, CODE files only ---
+      - 'LittleDoctorUpdate/**'
+      # --- but ignore non-code files so docs edits don't trigger a build ---
+      - '!LittleDoctorUpdate/**/*.md'
+      - '!LittleDoctorUpdate/**/*.markdown'
+      - '!LittleDoctorUpdate/**/*.rst'
+      - '!LittleDoctorUpdate/**/*.adoc'
+      - '!LittleDoctorUpdate/**/LICENSE*'
+      - '!LittleDoctorUpdate/**/docs/**'
+      - '!LittleDoctorUpdate/**/*.png'
+      - '!LittleDoctorUpdate/**/*.jpg'
+      - '!LittleDoctorUpdate/**/*.jpeg'
+      - '!LittleDoctorUpdate/**/*.gif'
+      - '!LittleDoctorUpdate/**/*.svg'
+      - '!LittleDoctorUpdate/**/*.ico'
+
+  workflow_dispatch:
+    inputs:
+      run_integration_tests:
+        description: 'Run integration tests if present'
+        type: boolean
+        default: true
+      run_image_scan:
+        description: 'Scan the built image with Trivy'
+        type: boolean
+        default: true
+      fail_on_scan:
+        description: 'Fail the build if CRITICAL/HIGH vulnerabilities are found'
+        type: boolean
+        default: false
+      version:
+        description: 'Explicit version tag (e.g. v1.2.3). Empty = auto-increment from ECR'
+        type: string
+        default: ''
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/deploy-application-to-ecr.yml
+    with:
+      app_name: littledoctor
+      app_dir: LittleDoctorUpdate
+      # On push events the dispatch inputs are empty -> use the defaults
+      run_integration_tests: ${{ github.event_name != 'workflow_dispatch' || inputs.run_integration_tests }}
+      run_image_scan: ${{ github.event_name != 'workflow_dispatch' || inputs.run_image_scan }}
+      fail_on_scan: ${{ github.event_name == 'workflow_dispatch' && inputs.fail_on_scan }}
+      version: ${{ inputs.version || '' }}

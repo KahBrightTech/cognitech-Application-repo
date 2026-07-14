@@ -1,96 +1,46 @@
-name: Deploy-littledoctor-to-ECR
+name: deploy-littledoctor-to-ecr
 
 # =============================================================================
-# Reusable CI ENGINE - not triggered directly by pushes.
+# Self-contained CI/CD pipeline for the LittleDoctor application.
 #
-# Each app has its own thin workflow (deploy-pulseboard.yml,
-# deploy-movienight.yml, deploy-hirepath.yml, deploy-littledoctor.yml) that:
-#   - owns the push trigger, scoped to its app folder (code files only)
-#   - offers a manual run (workflow_dispatch)
-#   - calls this engine with `app_name` + `app_dir`
+# TRIGGERS
+#   - push to main touching anything under LittleDoctorUpdate/ .
+#     Doc/markdown/image-only changes are filtered out by the `changes` job
+#     (the run starts but builds nothing), so no exclusion list is needed here.
+#   - manual run (workflow_dispatch) with the same options as the generic
+#     deploy-application-to-ecr workflow. Manual runs build ALL components.
 #
-# The engine discovers every component (directory with a Dockerfile) inside
-# `app_dir`, then:
-#   - push-triggered runs: builds only components whose CODE files changed
-#   - manual runs: builds all components of the app
-# For each component: detect language -> lint -> test -> Trivy scan (source)
-# -> docker build -> Trivy scan (image) -> push vX.Y.Z + latest to ECR.
-# It does NOT deploy to EKS.
+# PIPELINE (per component = per directory with a Dockerfile)
+#   detect language -> lint -> unit tests -> integration tests ->
+#   Trivy scan (source) -> docker build -> Trivy scan (image) ->
+#   push vX.Y.Z + latest to ECR. It does NOT deploy to EKS.
 #
-# Images are tagged <app_name>-<component>-vX.Y.Z (e.g. pulseboard-backend-v1.2.3).
+# Images are tagged littledoctor-<component>-vX.Y.Z
 #
-# To add a NEW APP: copy one of the thin caller workflows, change the folder
-# paths and app_name. This engine needs no changes.
-#
-# The engine also has its own workflow_dispatch for one-off manual builds of
-# any folder without a dedicated caller.
+# =============================================================================
+# TO CREATE A WORKFLOW FOR A NEW APP, copy this file and change 3 things:
+#   1. `name:` above
+#   2. the single `paths:` line in the push trigger
+#   3. APP_NAME and APP_DIR in the `env:` block
+# (GitHub does not allow variables in trigger `paths:` - they are evaluated
+#  before the workflow context exists - hence the one hardcoded line.)
 # =============================================================================
 
 on:
-  workflow_call:
+  push:
+    branches:
+      - main
+    paths:
+      - 'LittleDoctorUpdate/**'   # 👈 (2) the app folder - only change needed here
+
+  workflow_dispatch:
     inputs:
-      app_dir:
-        description: 'App folder to build, e.g. PulseBoard'
-        required: true
-        type: string
-      app_name:
-        description: 'App name / image tag prefix, e.g. pulseboard. Empty = lowercased folder name'
-        required: false
-        type: string
-        default: ''
       run_integration_tests:
         description: 'Run integration tests if present'
-        required: false
         type: boolean
         default: true
       run_image_scan:
         description: 'Scan source and built image with Trivy'
-        required: false
-        type: boolean
-        default: true
-      fail_on_scan:
-        description: 'Fail the build if CRITICAL/HIGH vulnerabilities are found'
-        required: false
-        type: boolean
-        default: false
-      version:
-        description: 'Explicit version tag (e.g. v1.2.3). Empty = auto-increment from ECR'
-        required: false
-        type: string
-        default: ''
-      aws_region:
-        description: 'AWS region'
-        required: false
-        type: string
-        default: 'us-east-1'
-      ecr_repository:
-        description: 'ECR repository name'
-        required: false
-        type: string
-        default: 'int-production-use1-ecs'
-      iam_role:
-        description: 'IAM role ARN to assume via OIDC'
-        required: false
-        type: string
-        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
-
-  workflow_dispatch:
-    inputs:
-      app_dir:
-        description: 'App folder to build (e.g. PulseBoard, MovieNight, HirePath, LittleDoctorUpdate)'
-        required: true
-        type: string
-      app_name:
-        description: 'App name / image tag prefix (e.g. pulseboard). Empty = lowercased folder name'
-        required: false
-        type: string
-        default: ''
-      run_integration_tests:
-        description: 'Run integration tests if present'
-        type: boolean
-        default: true
-      run_image_scan:
-        description: 'Scan the built image with Trivy'
         type: boolean
         default: true
       fail_on_scan:
@@ -101,26 +51,13 @@ on:
         description: 'Explicit version tag (e.g. v1.2.3). Empty = auto-increment from ECR'
         type: string
         default: ''
-      aws_region:
-        description: 'AWS region'
-        required: false
-        type: string
-        default: 'us-east-1'
-      ecr_repository:
-        description: 'ECR repository name'
-        required: false
-        type: string
-        default: 'int-production-use1-ecs'
-      iam_role:
-        description: 'IAM role ARN to assume via OIDC'
-        required: false
-        type: string
-        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
 
 env:
-  AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
-  ECR_REPOSITORY: ${{ inputs.ecr_repository || 'int-production-use1-ecs' }}
-  IAM_ROLE: ${{ inputs.iam_role || 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role' }}
+  APP_NAME: littledoctor          # 👈 (3) image tag prefix
+  APP_DIR: LittleDoctorUpdate     # 👈 (3) app folder to build
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: int-production-use1-ecs
+  IAM_ROLE: arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role
 
 permissions:
   id-token: write
@@ -129,12 +66,12 @@ permissions:
 
 jobs:
   # ==========================================================================
-  # 1. Discover the app's components and decide what to build
-  #    - push-triggered (via caller): only components with changed CODE files
-  #    - manual (workflow_dispatch anywhere): all components of the app
+  # 1. Discover components (directories with a Dockerfile) inside APP_DIR
+  #    - push: build only components whose CODE files changed
+  #    - manual run: build all components
   # ==========================================================================
   changes:
-    name: Discover components of ${{ inputs.app_dir }}
+    name: Detect changed components
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
@@ -149,24 +86,8 @@ jobs:
         id: set
         run: |
           set -e
-          APP_DIR="${{ inputs.app_dir }}"
-          APP_DIR="${APP_DIR%/}"   # strip trailing slash
 
-          if [ ! -d "$APP_DIR" ]; then
-            echo "❌ Folder '$APP_DIR' does not exist in this repo."
-            echo "   Available app folders:"
-            find . -mindepth 2 -maxdepth 3 -type f -iname 'Dockerfile' -not -path '*/node_modules/*' \
-              | sed 's|^\./||' | cut -d/ -f1 | sort -u | sed 's/^/   - /'
-            exit 1
-          fi
-
-          # App name = explicit input, or lowercased folder name if empty
-          APP="${{ inputs.app_name }}"
-          if [ -z "$APP" ]; then
-            APP=$(basename "$APP_DIR" | tr '[:upper:]' '[:lower:]')
-          fi
-
-          # --- Every directory with a Dockerfile inside the app folder is a component ---
+          # --- Auto-discover components: every directory with a Dockerfile ---
           mapfile -t DFILES < <(find "$APP_DIR" -type f -iname 'Dockerfile' -not -path '*/node_modules/*' | sort)
 
           if [ ${#DFILES[@]} -eq 0 ]; then
@@ -176,7 +97,7 @@ jobs:
             exit 1
           fi
 
-          # --- Manual runs build everything; push runs build only what changed ---
+          # --- Manual runs build everything; pushes build only what changed ---
           BUILD_ALL="true"
           CHANGED=""
           if [ "${{ github.event_name }}" == "push" ]; then
@@ -206,6 +127,7 @@ jobs:
             REL="${DIR#$APP_DIR}"; REL="${REL#/}"
             if [ -z "$REL" ]; then COMP="app"; else COMP=$(echo "$REL" | tr '/' '-' | tr '[:upper:]' '[:lower:]'); fi
 
+            # On push: build only if a CODE file inside this component changed
             BUILD_THIS="$BUILD_ALL"
             if [ "$BUILD_ALL" != "true" ]; then
               while IFS= read -r f; do
@@ -217,11 +139,11 @@ jobs:
             fi
 
             if [ "$BUILD_THIS" = "true" ]; then
-              echo "🧩 $APP/$COMP ($DIR) -> will build"
+              echo "🧩 $APP_NAME/$COMP ($DIR) -> will build"
               if [ -n "$INCLUDE" ]; then INCLUDE="$INCLUDE,"; fi
-              INCLUDE="$INCLUDE{\"app\":\"$APP\",\"component\":\"$COMP\",\"context\":\"$DIR\",\"dockerfile\":\"$DF\"}"
+              INCLUDE="$INCLUDE{\"component\":\"$COMP\",\"context\":\"$DIR\",\"dockerfile\":\"$DF\"}"
             else
-              echo "⏭️  $APP/$COMP ($DIR) -> unchanged, skipping"
+              echo "⏭️  $APP_NAME/$COMP ($DIR) -> unchanged, skipping"
             fi
           done
 
@@ -237,7 +159,7 @@ jobs:
   # 2. Build, test, scan & push each selected component
   # ==========================================================================
   build:
-    name: ${{ matrix.app }}-${{ matrix.component }}
+    name: ${{ matrix.component }}
     needs: changes
     if: needs.changes.outputs.any == 'true'
     runs-on: ubuntu-latest
@@ -307,7 +229,7 @@ jobs:
           fi
 
       - name: Node - integration tests
-        if: steps.detect.outputs.language == 'node' && inputs.run_integration_tests
+        if: steps.detect.outputs.language == 'node' && (github.event_name != 'workflow_dispatch' || inputs.run_integration_tests)
         working-directory: ${{ matrix.context }}
         run: |
           echo "🔗 Running integration tests..."
@@ -341,7 +263,7 @@ jobs:
           fi
 
       - name: Python - integration tests
-        if: steps.detect.outputs.language == 'python' && inputs.run_integration_tests
+        if: steps.detect.outputs.language == 'python' && (github.event_name != 'workflow_dispatch' || inputs.run_integration_tests)
         working-directory: ${{ matrix.context }}
         run: |
           echo "🔗 Running integration tests..."
@@ -410,7 +332,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.IAM_ROLE }}
-          role-session-name: GitHubActions-${{ matrix.app }}-${{ github.run_id }}
+          role-session-name: GitHubActions-${{ env.APP_NAME }}-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -423,8 +345,8 @@ jobs:
       - name: Resolve version
         id: version
         run: |
-          IMAGE_PREFIX="${{ matrix.app }}-${{ matrix.component }}"
-          REGISTRY="${{ steps.account-id.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}"
+          IMAGE_PREFIX="${APP_NAME}-${{ matrix.component }}"
+          REGISTRY="${{ steps.account-id.outputs.account_id }}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}"
           INPUT_VERSION="${{ inputs.version }}"
 
           if [ -n "$INPUT_VERSION" ]; then
@@ -433,8 +355,8 @@ jobs:
           else
             echo "🔍 Checking latest version in ECR for '${IMAGE_PREFIX}'..."
             VERSIONS=$(aws ecr describe-images \
-              --repository-name "${{ env.ECR_REPOSITORY }}" \
-              --region "${{ env.AWS_REGION }}" \
+              --repository-name "${ECR_REPOSITORY}" \
+              --region "${AWS_REGION}" \
               --query 'imageDetails[*].imageTags[]' \
               --output text 2>/dev/null | tr '\t' '\n' \
               | grep -E "^${IMAGE_PREFIX}-v[0-9]+\.[0-9]+\.[0-9]+$" \
@@ -465,7 +387,7 @@ jobs:
       # discards them from the final image.
       # ----------------------------------------------------------------
       - name: Scan dependencies with Trivy (filesystem)
-        if: inputs.run_image_scan
+        if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
@@ -473,7 +395,7 @@ jobs:
           format: 'sarif'
           output: 'trivy-fs-results.sarif'
           severity: 'CRITICAL,HIGH'
-          exit-code: ${{ inputs.fail_on_scan && '1' || '0' }}
+          exit-code: ${{ (github.event_name == 'workflow_dispatch' && inputs.fail_on_scan) && '1' || '0' }}
           ignore-unfixed: true
 
       # Upload to Security tab. Non-blocking (continue-on-error) so a report
@@ -483,7 +405,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-fs-results.sarif'
-          category: trivy-fs-${{ matrix.app }}-${{ matrix.component }}
+          category: trivy-fs-${{ env.APP_NAME }}-${{ matrix.component }}
         continue-on-error: true
 
       # ----------------------------------------------------------------
@@ -506,14 +428,14 @@ jobs:
       # (Optional) Vulnerability scan of the built image
       # ----------------------------------------------------------------
       - name: Scan image with Trivy
-        if: inputs.run_image_scan
+        if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.version.outputs.image_tag }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-          exit-code: ${{ inputs.fail_on_scan && '1' || '0' }}
+          exit-code: ${{ (github.event_name == 'workflow_dispatch' && inputs.fail_on_scan) && '1' || '0' }}
           ignore-unfixed: true
 
       # Upload to Security tab. Non-blocking so it never fails the build.
@@ -522,7 +444,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
-          category: trivy-image-${{ matrix.app }}-${{ matrix.component }}
+          category: trivy-image-${{ env.APP_NAME }}-${{ matrix.component }}
         continue-on-error: true
 
       # ----------------------------------------------------------------
@@ -542,12 +464,12 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "## 🐳 ${{ matrix.app }}-${{ matrix.component }}"
+            echo "## 🐳 ${{ env.APP_NAME }}-${{ matrix.component }}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| App | \`${{ matrix.app }}\` |"
+            echo "| App | \`${{ env.APP_NAME }}\` |"
             echo "| Language | \`${{ steps.detect.outputs.language }}\` |"
             echo "| Version | \`${{ steps.version.outputs.version }}\` |"
-            echo "| Image | \`${{ matrix.app }}-${{ matrix.component }}-${{ steps.version.outputs.version }}\` |"
+            echo "| Image | \`${{ env.APP_NAME }}-${{ matrix.component }}-${{ steps.version.outputs.version }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
