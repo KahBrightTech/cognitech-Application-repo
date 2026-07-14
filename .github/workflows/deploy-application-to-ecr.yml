@@ -1,46 +1,25 @@
 name: Deploy-application-to-ECR
 
 # =============================================================================
-# Multi-app CI pipeline for ALL apps in this repo.
-# On every push to main it AUTO-DISCOVERS apps: every top-level folder
-# (except the excluded ones) containing a Dockerfile is an app; every
-# directory holding a Dockerfile is a buildable component.
-# For each CHANGED component it detects the language, lints, tests, builds
-# a Docker image, scans it (source + image), and pushes a new version
-# (+ latest) to ECR. It does NOT deploy to EKS.
+# Manual, multi-app CI pipeline. Run it from the Actions tab and pass the
+# app folder to build (e.g. PulseBoard, MovieNight, HirePath,
+# LittleDoctorUpdate). Every directory with a Dockerfile inside that folder
+# is a buildable component. For each component the pipeline detects the
+# language, lints, tests, builds a Docker image, scans it (source + image),
+# and pushes a new version (+ latest) to ECR.
+# It does NOT deploy to EKS.
 #
-# Adding a new app requires ZERO workflow changes: create the folder with a
-# Dockerfile and push. Images are tagged <app>-<component>-vX.Y.Z where
-# <app> is the lowercased top-level folder name.
-#
-# workflow_dispatch builds everything (or one app via `app_filter`).
+# Images are tagged <app>-<component>-vX.Y.Z where <app> is the lowercased
+# app folder name (e.g. pulseboard-backend-v1.2.3).
 # =============================================================================
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - '**/*.md'
-      - '**/*.markdown'
-      - '**/*.rst'
-      - '**/*.adoc'
-      - '**/LICENSE*'
-      - '**/docs/**'
-      - '**/*.png'
-      - '**/*.jpg'
-      - '**/*.jpeg'
-      - '**/*.gif'
-      - '**/*.svg'
-      - '**/*.ico'
-
   workflow_dispatch:
     inputs:
-      app_filter:
-        description: 'Only build this app (top-level folder name, e.g. PulseBoard). Empty = all apps'
-        required: false
+      app_dir:
+        description: 'App folder to build (e.g. PulseBoard, MovieNight, HirePath, LittleDoctorUpdate)'
+        required: true
         type: string
-        default: ''
       run_integration_tests:
         description: 'Run integration tests if present'
         type: boolean
@@ -74,10 +53,9 @@ on:
         default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
 
 env:
-  # inputs.* is empty on push events -> fall back to the defaults
-  AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
-  ECR_REPOSITORY: ${{ inputs.ecr_repository || 'int-production-use1-ecs' }}
-  IAM_ROLE: ${{ inputs.iam_role || 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role' }}
+  AWS_REGION: ${{ inputs.aws_region }}
+  ECR_REPOSITORY: ${{ inputs.ecr_repository }}
+  IAM_ROLE: ${{ inputs.iam_role }}
 
 permissions:
   id-token: write
@@ -86,10 +64,10 @@ permissions:
 
 jobs:
   # ==========================================================================
-  # 1. Discover apps/components repo-wide and detect which ones changed
+  # 1. Discover the components (Dockerfiles) of the requested app folder
   # ==========================================================================
-  changes:
-    name: Discover apps & detect changes
+  discover:
+    name: Discover components of ${{ inputs.app_dir }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
@@ -97,120 +75,61 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # need history so we can diff against the previous commit
 
-      - name: Discover apps & detect changes
+      - name: Discover components
         id: set
         run: |
           set -e
-          APP_FILTER="${{ inputs.app_filter }}"
-          EXCLUDE_DIRS="Archives"   # top-level folders that are never built
+          # Strip any trailing slash the user may have typed
+          APP_DIR="${{ inputs.app_dir }}"
+          APP_DIR="${APP_DIR%/}"
 
-          # --- Auto-discover: every directory with a Dockerfile is a component;
-          #     its top-level folder is the app. ---
-          mapfile -t DFILES < <(find . -type f -iname 'Dockerfile' \
-            -not -path '*/node_modules/*' \
-            -not -path './.git/*' \
-            -not -path './.github/*' \
-            | sed 's|^\./||' | sort)
+          if [ ! -d "$APP_DIR" ]; then
+            echo "❌ Folder '$APP_DIR' does not exist in this repo."
+            echo "   Available app folders:"
+            find . -mindepth 2 -maxdepth 3 -type f -iname 'Dockerfile' -not -path '*/node_modules/*' \
+              | sed 's|^\./||' | cut -d/ -f1 | sort -u | sed 's/^/   - /'
+            exit 1
+          fi
+
+          APP=$(basename "$APP_DIR" | tr '[:upper:]' '[:lower:]')
+
+          # --- Every directory with a Dockerfile inside the app folder is a component ---
+          mapfile -t DFILES < <(find "$APP_DIR" -type f -iname 'Dockerfile' -not -path '*/node_modules/*' | sort)
 
           if [ ${#DFILES[@]} -eq 0 ]; then
-            echo "❌ No Dockerfile found anywhere. Nothing to build."
+            echo "❌ No Dockerfile found under '$APP_DIR'. Nothing to build."
             echo "any=false" >> "$GITHUB_OUTPUT"
             echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
-            exit 0
+            exit 1
           fi
-
-          # --- Decide whether to build everything or only changed components ---
-          BUILD_ALL="false"
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then BUILD_ALL="true"; fi
-
-          CHANGED=""
-          if [ "$BUILD_ALL" != "true" ]; then
-            BASE="${{ github.event.before }}"
-            HEAD="${{ github.sha }}"
-            if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-              BUILD_ALL="true"   # new branch / no diff base -> build all
-            else
-              CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || echo "")
-              if [ -z "$CHANGED" ]; then BUILD_ALL="true"; fi
-            fi
-          fi
-
-          # A path is "code" unless it's docs/markdown/images.
-          is_code() {
-            case "$1" in
-              *.md|*.markdown|*.rst|*.adoc|*/docs/*|*LICENSE*|*.png|*.jpg|*.jpeg|*.gif|*.svg|*.ico) return 1 ;;
-              *) return 0 ;;
-            esac
-          }
 
           INCLUDE=""
           for DF in "${DFILES[@]}"; do
-            # Skip a Dockerfile sitting at the repo root - apps live in folders.
-            case "$DF" in */*) ;; *) continue ;; esac
-
-            TOP="${DF%%/*}"
-
-            # Skip excluded top-level folders (archives etc.)
-            SKIP="false"
-            for EX in $EXCLUDE_DIRS; do
-              if [ "$TOP" = "$EX" ]; then SKIP="true"; break; fi
-            done
-            [ "$SKIP" = "true" ] && continue
-
-            APP=$(echo "$TOP" | tr '[:upper:]' '[:lower:]')
-
-            # Optional single-app filter (workflow_dispatch)
-            if [ -n "$APP_FILTER" ]; then
-              FILTER=$(echo "$APP_FILTER" | tr '[:upper:]' '[:lower:]')
-              [ "$APP" != "$FILTER" ] && continue
-            fi
-
             DIR=$(dirname "$DF")
             # Component name = path under the app folder, slashes -> dashes.
-            REL="${DIR#$TOP}"; REL="${REL#/}"
+            REL="${DIR#$APP_DIR}"; REL="${REL#/}"
             if [ -z "$REL" ]; then COMP="app"; else COMP=$(echo "$REL" | tr '/' '-' | tr '[:upper:]' '[:lower:]'); fi
 
-            BUILD_THIS="$BUILD_ALL"
-            if [ "$BUILD_ALL" != "true" ]; then
-              while IFS= read -r f; do
-                [ -z "$f" ] && continue
-                case "$f" in
-                  "$DIR"/*) if is_code "$f"; then BUILD_THIS="true"; break; fi ;;
-                esac
-              done <<< "$CHANGED"
-            fi
-
-            if [ "$BUILD_THIS" = "true" ]; then
-              echo "🧩 $APP/$COMP ($DIR) -> will build"
-              if [ -n "$INCLUDE" ]; then INCLUDE="$INCLUDE,"; fi
-              INCLUDE="$INCLUDE{\"app\":\"$APP\",\"component\":\"$COMP\",\"context\":\"$DIR\",\"dockerfile\":\"$DF\"}"
-            else
-              echo "⏭️  $APP/$COMP ($DIR) -> unchanged, skipping"
-            fi
+            echo "🧩 $APP/$COMP ($DIR) -> will build"
+            if [ -n "$INCLUDE" ]; then INCLUDE="$INCLUDE,"; fi
+            INCLUDE="$INCLUDE{\"app\":\"$APP\",\"component\":\"$COMP\",\"context\":\"$DIR\",\"dockerfile\":\"$DF\"}"
           done
 
-          if [ -z "$INCLUDE" ]; then
-            echo "✅ No code changes detected in any component."
-            echo "any=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "any=true" >> "$GITHUB_OUTPUT"
-          fi
+          echo "any=true" >> "$GITHUB_OUTPUT"
           echo "matrix={\"include\":[$INCLUDE]}" >> "$GITHUB_OUTPUT"
 
   # ==========================================================================
-  # 2. Build, test, scan & push each changed component of each changed app
+  # 2. Build, test, scan & push each component of the requested app
   # ==========================================================================
   build:
     name: ${{ matrix.app }}-${{ matrix.component }}
-    needs: changes
-    if: needs.changes.outputs.any == 'true'
+    needs: discover
+    if: needs.discover.outputs.any == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -274,7 +193,7 @@ jobs:
           fi
 
       - name: Node - integration tests
-        if: steps.detect.outputs.language == 'node' && (github.event_name != 'workflow_dispatch' || inputs.run_integration_tests)
+        if: steps.detect.outputs.language == 'node' && inputs.run_integration_tests
         working-directory: ${{ matrix.context }}
         run: |
           echo "🔗 Running integration tests..."
@@ -308,7 +227,7 @@ jobs:
           fi
 
       - name: Python - integration tests
-        if: steps.detect.outputs.language == 'python' && (github.event_name != 'workflow_dispatch' || inputs.run_integration_tests)
+        if: steps.detect.outputs.language == 'python' && inputs.run_integration_tests
         working-directory: ${{ matrix.context }}
         run: |
           echo "🔗 Running integration tests..."
@@ -432,7 +351,7 @@ jobs:
       # discards them from the final image.
       # ----------------------------------------------------------------
       - name: Scan dependencies with Trivy (filesystem)
-        if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
+        if: inputs.run_image_scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
@@ -440,7 +359,7 @@ jobs:
           format: 'sarif'
           output: 'trivy-fs-results.sarif'
           severity: 'CRITICAL,HIGH'
-          exit-code: ${{ (github.event_name == 'workflow_dispatch' && inputs.fail_on_scan) && '1' || '0' }}
+          exit-code: ${{ inputs.fail_on_scan && '1' || '0' }}
           ignore-unfixed: true
 
       # Upload to Security tab. Non-blocking (continue-on-error) so a report
@@ -473,14 +392,14 @@ jobs:
       # (Optional) Vulnerability scan of the built image
       # ----------------------------------------------------------------
       - name: Scan image with Trivy
-        if: github.event_name != 'workflow_dispatch' || inputs.run_image_scan
+        if: inputs.run_image_scan
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.version.outputs.image_tag }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-          exit-code: ${{ (github.event_name == 'workflow_dispatch' && inputs.fail_on_scan) && '1' || '0' }}
+          exit-code: ${{ inputs.fail_on_scan && '1' || '0' }}
           ignore-unfixed: true
 
       # Upload to Security tab. Non-blocking so it never fails the build.
