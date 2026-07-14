@@ -17,9 +17,14 @@ on:
   workflow_dispatch:
     inputs:
       app_dir:
-        description: 'App folder to build (e.g. PulseBoard, MovieNight, HirePath, LittleDoctorUpdate)'
+        description: 'App folder to build (e.g. PulseBoard)'
         required: true
         type: string
+      app_name:
+        description: 'App name / image tag prefix (e.g. pulseboard). Empty = lowercased folder name'
+        required: false
+        type: string
+        default: ''
       run_integration_tests:
         description: 'Run integration tests if present'
         type: boolean
@@ -92,7 +97,11 @@ jobs:
             exit 1
           fi
 
-          APP=$(basename "$APP_DIR" | tr '[:upper:]' '[:lower:]')
+          # App name = explicit input, or lowercased folder name if empty
+          APP="${{ inputs.app_name }}"
+          if [ -z "$APP" ]; then
+            APP=$(basename "$APP_DIR" | tr '[:upper:]' '[:lower:]')
+          fi
 
           # --- Every directory with a Dockerfile inside the app folder is a component ---
           mapfile -t DFILES < <(find "$APP_DIR" -type f -iname 'Dockerfile' -not -path '*/node_modules/*' | sort)
