@@ -49,6 +49,26 @@ on:
         required: false
         type: string
         default: ''
+      include_backend:
+        description: 'Deploy the backend component'
+        required: false
+        type: boolean
+        default: true
+      backend_tag:
+        description: 'Explicit backend image tag (empty = derive <app>-backend-<version>)'
+        required: false
+        type: string
+        default: ''
+      include_frontend:
+        description: 'Deploy the frontend component'
+        required: false
+        type: boolean
+        default: true
+      frontend_tag:
+        description: 'Explicit frontend image tag (empty = derive <app>-frontend-<version>)'
+        required: false
+        type: string
+        default: ''
       action:
         description: 'deploy or delete'
         required: false
@@ -112,6 +132,26 @@ on:
         required: false
         type: string
         default: ''
+      include_backend:
+        description: 'Deploy the backend component'
+        required: false
+        type: boolean
+        default: true
+      backend_tag:
+        description: 'Explicit backend image tag (empty = derive <app>-backend-<version>)'
+        required: false
+        type: string
+        default: ''
+      include_frontend:
+        description: 'Deploy the frontend component'
+        required: false
+        type: boolean
+        default: true
+      frontend_tag:
+        description: 'Explicit frontend image tag (empty = derive <app>-frontend-<version>)'
+        required: false
+        type: string
+        default: ''
       action:
         description: 'Deploy or delete'
         required: true
@@ -170,20 +210,50 @@ jobs:
         run: aws eks update-kubeconfig --name "${{ env.EKS_CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
 
       # ----------------------------------------------------------------
+      # Resolve components + tag overrides. If the generic `components`
+      # input is empty, derive it from include_backend/include_frontend.
+      # backend_tag/frontend_tag are merged into tag_overrides (component
+      # manifests still fall back to <app>-<component>-<version>).
+      # ----------------------------------------------------------------
+      - name: Resolve components and tag overrides
+        run: |
+          COMPONENTS="${{ inputs.components }}"
+          TAG_OVERRIDES="${{ inputs.tag_overrides }}"
+
+          if [ -z "$COMPONENTS" ]; then
+            PARTS=()
+            [ "${{ inputs.include_backend }}" == "true" ] && PARTS+=("backend")
+            [ "${{ inputs.include_frontend }}" == "true" ] && PARTS+=("frontend")
+            COMPONENTS=$(IFS=,; echo "${PARTS[*]}")
+          fi
+
+          if [ "${{ inputs.include_backend }}" == "true" ] && [ -n "${{ inputs.backend_tag }}" ]; then
+            TAG_OVERRIDES="${TAG_OVERRIDES:+$TAG_OVERRIDES,}backend=${{ inputs.backend_tag }}"
+          fi
+          if [ "${{ inputs.include_frontend }}" == "true" ] && [ -n "${{ inputs.frontend_tag }}" ]; then
+            TAG_OVERRIDES="${TAG_OVERRIDES:+$TAG_OVERRIDES,}frontend=${{ inputs.frontend_tag }}"
+          fi
+
+          echo "🧩 Resolved components: $COMPONENTS"
+          echo "🏷️  Resolved tag overrides: $TAG_OVERRIDES"
+          echo "COMPONENTS=$COMPONENTS" >> "$GITHUB_ENV"
+          echo "TAG_OVERRIDES=$TAG_OVERRIDES" >> "$GITHUB_ENV"
+
+      # ----------------------------------------------------------------
       # Verify requested version exists in ECR (deploy only, if components given)
       # ----------------------------------------------------------------
       - name: Verify images exist in ECR
-        if: inputs.action == 'deploy' && inputs.components != ''
+        if: inputs.action == 'deploy' && env.COMPONENTS != ''
         run: |
           # Explicit tag overrides (component=tag pairs).
           declare -A OVERRIDE
-          IFS=',' read -ra PAIRS <<< "${{ inputs.tag_overrides }}"
+          IFS=',' read -ra PAIRS <<< "$TAG_OVERRIDES"
           for p in "${PAIRS[@]}"; do
             p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
             OVERRIDE["${p%%=*}"]="${p#*=}"
           done
 
-          IFS=',' read -ra COMPS <<< "${{ inputs.components }}"
+          IFS=',' read -ra COMPS <<< "$COMPONENTS"
           for COMPONENT in "${COMPS[@]}"; do
             COMPONENT="$(echo "$COMPONENT" | xargs)"; [ -z "$COMPONENT" ] && continue
             TAG="${OVERRIDE[$COMPONENT]:-}"
@@ -214,12 +284,12 @@ jobs:
 
           # Requested components (whitelist). Empty list = deploy everything.
           declare -A KEEP; FILTER=false
-          IFS=',' read -ra COMPS <<< "${{ inputs.components }}"
+          IFS=',' read -ra COMPS <<< "$COMPONENTS"
           for c in "${COMPS[@]}"; do c="$(echo "$c" | xargs)"; [ -n "$c" ] && { KEEP["$c"]=1; FILTER=true; }; done
 
           # Explicit tag overrides (component=tag pairs).
           declare -A OVERRIDE
-          IFS=',' read -ra PAIRS <<< "${{ inputs.tag_overrides }}"
+          IFS=',' read -ra PAIRS <<< "$TAG_OVERRIDES"
           for p in "${PAIRS[@]}"; do p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue; OVERRIDE["${p%%=*}"]="${p#*=}"; done
 
           if [ "$FILTER" = "true" ]; then echo "🧩 Deploying components: ${!KEEP[*]}"; else echo "🧩 Deploying ALL components in '$SRC'"; fi
@@ -306,5 +376,6 @@ jobs:
             echo "| Version | \`${{ inputs.version }}\` |"
             echo "| Namespace | \`${{ inputs.namespace }}\` |"
             echo "| Manifests | \`${{ inputs.manifests_path }}\` |"
+            echo "| Components | \`${{ env.COMPONENTS }}\` |"
             echo "| Cluster | \`${{ env.EKS_CLUSTER_NAME }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
