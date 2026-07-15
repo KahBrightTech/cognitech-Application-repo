@@ -1,4 +1,4 @@
-name: Deploy-application-with-kubectl
+name: Deploy-primary-application-with-kubectl
 
 # =============================================================================
 # Generic, reusable deploy-to-EKS workflow. Works for ANY app that keeps its
