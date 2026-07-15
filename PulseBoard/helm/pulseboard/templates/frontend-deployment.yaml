@@ -55,3 +55,10 @@ spec:
             periodSeconds: 20
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+          volumeMounts:
+            - name: {{ .Values.global.storage.pvcName }}
+              mountPath: /usr/share/nginx/html
+      volumes:
+        - name: {{ .Values.global.storage.pvcName }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.global.storage.pvcName }}
