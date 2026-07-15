@@ -9,4 +9,4 @@ spec:
   storageClassName: {{ .Values.global.storage.ClassName }} 
   resources:
     requests:
-      storage: 20Gi 
+      storage: {{ .Values.global.storage.size }}
