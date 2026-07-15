@@ -9,6 +9,7 @@ global:
   storage:
     pvcName: front-end-storage
     size: 30Gi
+    mountPath: /var/cache/nginx
     ClassName: fast-ssd
     reclaimPolicy: Delete
     allowVolumeExpansion: true

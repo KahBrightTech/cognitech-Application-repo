@@ -57,7 +57,7 @@ spec:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           volumeMounts:
             - name: {{ .Values.global.storage.pvcName }}
-              mountPath: /usr/share/nginx/html
+              mountPath: {{ .Values.global.storage.mountPath }}
       volumes:
         - name: {{ .Values.global.storage.pvcName }}
           persistentVolumeClaim:
