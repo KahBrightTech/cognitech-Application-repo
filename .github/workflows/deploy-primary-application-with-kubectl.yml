@@ -1,0 +1,361 @@
+name: Deploy-primary-application-with-kubectl
+
+# =============================================================================
+# Generic, reusable deploy-to-EKS workflow.
+#
+# This workflow:
+#   - Does not build images.
+#   - Deploys exact frontend/backend tags already stored in ECR.
+#   - Requires a tag only when that component is enabled.
+#   - Derives the full ECR repository URI automatically from:
+#       AWS account ID + AWS region + ECR repository name
+#   - Renders only Kubernetes manifests from the selected manifests folder.
+#
+# Supported placeholders inside Kubernetes manifests:
+#   __NAMESPACE__
+#   __REGISTRY__
+#   __BACKEND_TAG__
+#   __FRONTEND_TAG__
+#
+# Example:
+#   image: __REGISTRY__:__FRONTEND_TAG__
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifests_path:
+        description: 'Exact folder containing Kubernetes manifests, for example LittleDoctorUpdate/little-doctor-academy/k8s'
+        required: true
+        type: string
+        default: 'LittleDoctorUpdate/little-doctor-academy/k8s'
+
+      namespace:
+        description: 'Existing target Kubernetes namespace'
+        required: true
+        type: string
+        default: 'healthpath'
+
+      include_backend:
+        description: 'Deploy the backend component'
+        required: false
+        type: boolean
+        default: false
+
+      backend_tag:
+        description: 'Exact backend ECR image tag'
+        required: false
+        type: string
+        default: ''
+
+      include_frontend:
+        description: 'Deploy the frontend component'
+        required: false
+        type: boolean
+        default: true
+
+      frontend_tag:
+        description: 'Exact frontend ECR image tag'
+        required: false
+        type: string
+        default: 'littledoctor-little-doctor-academy-v1.0.2'
+
+      action:
+        description: 'Deploy or delete'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - delete
+        default: deploy
+
+      aws_region:
+        description: 'AWS region'
+        required: true
+        type: string
+        default: 'us-east-1'
+
+      ecr_repository:
+        description: 'ECR repository name'
+        required: true
+        type: string
+        default: 'int-production-use1-ecs'
+
+      eks_cluster:
+        description: 'Target EKS cluster name'
+        required: true
+        type: string
+        default: 'int-production-use1-prod-novutech-eks-cluster'
+
+      iam_role:
+        description: 'IAM role ARN assumed through GitHub OIDC'
+        required: true
+        type: string
+        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
+
+env:
+  AWS_REGION: ${{ inputs.aws_region }}
+  ECR_REPOSITORY: ${{ inputs.ecr_repository }}
+  EKS_CLUSTER_NAME: ${{ inputs.eks_cluster }}
+  IAM_ROLE: ${{ inputs.iam_role }}
+  MANIFESTS_PATH: ${{ inputs.manifests_path }}
+  NAMESPACE: ${{ inputs.namespace }}
+  BACKEND_TAG: ${{ inputs.backend_tag }}
+  FRONTEND_TAG: ${{ inputs.frontend_tag }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ inputs.action }} application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Manifests path: ${MANIFESTS_PATH}"
+          echo "Namespace: ${NAMESPACE}"
+          echo "ECR repository: ${ECR_REPOSITORY}"
+
+          if [[ ! -d "${MANIFESTS_PATH}" ]]; then
+            echo "Manifests folder not found: ${MANIFESTS_PATH}"
+            exit 1
+          fi
+
+          if [[ "${{ inputs.action }}" == "deploy" ]]; then
+            if [[ "${{ inputs.include_backend }}" == "true" && -z "${BACKEND_TAG}" ]]; then
+              echo "backend_tag is required when include_backend is enabled."
+              exit 1
+            fi
+
+            if [[ "${{ inputs.include_frontend }}" == "true" && -z "${FRONTEND_TAG}" ]]; then
+              echo "frontend_tag is required when include_frontend is enabled."
+              exit 1
+            fi
+
+            if [[ "${{ inputs.include_backend }}" != "true" && "${{ inputs.include_frontend }}" != "true" ]]; then
+              echo "At least one component must be enabled."
+              exit 1
+            fi
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE }}
+          role-session-name: GitHubActions-Kubectl-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve ECR repository URI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          ECR_IMAGE_PATH="${ECR_REGISTRY}/${ECR_REPOSITORY}"
+
+          echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> "${GITHUB_ENV}"
+          echo "ECR_REGISTRY=${ECR_REGISTRY}" >> "${GITHUB_ENV}"
+          echo "ECR_IMAGE_PATH=${ECR_IMAGE_PATH}" >> "${GITHUB_ENV}"
+
+          echo "Resolved ECR image path: ${ECR_IMAGE_PATH}"
+
+      - name: Update kubeconfig
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          aws eks update-kubeconfig \
+            --name "${EKS_CLUSTER_NAME}" \
+            --region "${AWS_REGION}"
+
+      - name: Verify exact image tags exist in ECR
+        if: inputs.action == 'deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_image_tag() {
+            local tag="$1"
+
+            echo "Checking exact ECR image tag: ${tag}"
+
+            if aws ecr describe-images \
+              --repository-name "${ECR_REPOSITORY}" \
+              --region "${AWS_REGION}" \
+              --image-ids "imageTag=${tag}" \
+              >/dev/null 2>&1; then
+              echo "Found ${ECR_IMAGE_PATH}:${tag}"
+            else
+              echo "Image tag not found: ${ECR_IMAGE_PATH}:${tag}"
+              exit 1
+            fi
+          }
+
+          if [[ "${{ inputs.include_backend }}" == "true" ]]; then
+            check_image_tag "${BACKEND_TAG}"
+          fi
+
+          if [[ "${{ inputs.include_frontend }}" == "true" ]]; then
+            check_image_tag "${FRONTEND_TAG}"
+          fi
+
+      - name: Render Kubernetes manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RENDERED_PATH="rendered"
+
+          rm -rf "${RENDERED_PATH}"
+          mkdir -p "${RENDERED_PATH}"
+
+          echo "Rendering manifests from '${MANIFESTS_PATH}'"
+          echo "ECR image path: ${ECR_IMAGE_PATH}"
+          echo "Namespace: ${NAMESPACE}"
+
+          while IFS= read -r -d '' source_file; do
+            file_name="$(basename "${source_file}")"
+            output_file="${RENDERED_PATH}/${file_name}"
+
+            references_backend="false"
+            references_frontend="false"
+
+            grep -q '__BACKEND_TAG__' "${source_file}" && references_backend="true" || true
+            grep -q '__FRONTEND_TAG__' "${source_file}" && references_frontend="true" || true
+
+            if [[ "${references_backend}" == "true" && "${{ inputs.include_backend }}" != "true" ]]; then
+              echo "Skipping ${file_name}: backend is disabled."
+              continue
+            fi
+
+            if [[ "${references_frontend}" == "true" && "${{ inputs.include_frontend }}" != "true" ]]; then
+              echo "Skipping ${file_name}: frontend is disabled."
+              continue
+            fi
+
+            sed \
+              -e "s|__NAMESPACE__|${NAMESPACE}|g" \
+              -e "s|__REGISTRY__|${ECR_IMAGE_PATH}|g" \
+              -e "s|__BACKEND_TAG__|${BACKEND_TAG}|g" \
+              -e "s|__FRONTEND_TAG__|${FRONTEND_TAG}|g" \
+              "${source_file}" > "${output_file}"
+
+            echo "Rendered ${output_file}"
+          done < <(
+            find "${MANIFESTS_PATH}" \
+              -maxdepth 1 \
+              -type f \
+              \( -name '*.yaml' -o -name '*.yml' \) \
+              -print0
+          )
+
+          if ! find "${RENDERED_PATH}" -maxdepth 1 -type f | grep -q .; then
+            echo "No Kubernetes manifests were rendered."
+            exit 1
+          fi
+
+          echo "Rendered files:"
+          find "${RENDERED_PATH}" -maxdepth 1 -type f -print
+
+          if grep -R -nE '__[A-Z0-9_]+__' "${RENDERED_PATH}"; then
+            echo "One or more placeholders were not replaced."
+            exit 1
+          fi
+
+      - name: Validate rendered manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl apply \
+            --dry-run=client \
+            --namespace "${NAMESPACE}" \
+            --filename rendered/
+
+      - name: Deploy
+        if: inputs.action == 'deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Applying manifests to namespace '${NAMESPACE}'..."
+
+          kubectl apply \
+            --namespace "${NAMESPACE}" \
+            --filename rendered/
+
+          echo "Waiting for Deployments to become available..."
+
+          while IFS= read -r deployment; do
+            [[ -z "${deployment}" ]] && continue
+
+            kubectl rollout status \
+              "${deployment}" \
+              --namespace "${NAMESPACE}" \
+              --timeout=300s
+          done < <(
+            kubectl get deployments \
+              --namespace "${NAMESPACE}" \
+              --output=name
+          )
+
+      - name: Delete
+        if: inputs.action == 'delete'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Deleting rendered resources from namespace '${NAMESPACE}'..."
+
+          kubectl delete \
+            --namespace "${NAMESPACE}" \
+            --filename rendered/ \
+            --ignore-not-found=true
+
+      - name: Show status
+        if: always()
+        shell: bash
+        run: |
+          echo "=== Deployments ==="
+          kubectl get deployments --namespace "${NAMESPACE}" -o wide || true
+
+          echo "=== Pods ==="
+          kubectl get pods --namespace "${NAMESPACE}" -o wide || true
+
+          echo "=== Services ==="
+          kubectl get services --namespace "${NAMESPACE}" || true
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## kubectl ${{ inputs.action }}"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Action | \`${{ inputs.action }}\` |"
+            echo "| Namespace | \`${NAMESPACE}\` |"
+            echo "| Manifests | \`${MANIFESTS_PATH}\` |"
+            echo "| ECR repository | \`${ECR_REPOSITORY}\` |"
+            echo "| ECR image path | \`${ECR_IMAGE_PATH:-not-resolved}\` |"
+            echo "| Cluster | \`${EKS_CLUSTER_NAME}\` |"
+
+            if [[ "${{ inputs.include_backend }}" == "true" ]]; then
+              echo "| Backend tag | \`${BACKEND_TAG}\` |"
+            fi
+
+            if [[ "${{ inputs.include_frontend }}" == "true" ]]; then
+              echo "| Frontend tag | \`${FRONTEND_TAG}\` |"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
