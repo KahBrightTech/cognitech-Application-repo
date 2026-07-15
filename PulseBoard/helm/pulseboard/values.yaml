@@ -5,7 +5,7 @@ global:
   # Namespace to deploy into. Overridden by the workflow's namespace input.
   namespace: pulseboard
   # Common "app" label used in selectors and pod labels for every component.
-  appLabel: infogrid
+  appLabel: pulseboard
   storage:
     pvcName: front-end-storage
     size: 30Gi
