@@ -11,7 +11,6 @@ metadata:
     alb.ingress.kubernetes.io/target-type: {{ .Values.ingress.target_type | quote }}
     # Shared with the api Ingress so both provision onto the same ALB.
     alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.group_name | quote }}
-    alb.ingress.kubernetes.io/group.order: '10'
     # Loops through all health check values
     {{- range $key, $value := .Values.ingress.healthcheck }}
     alb.ingress.kubernetes.io/{{ $key }}: {{ $value | quote }}

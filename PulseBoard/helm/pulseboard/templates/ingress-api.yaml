@@ -13,7 +13,6 @@ metadata:
     alb.ingress.kubernetes.io/load-balancer-name: {{ .Values.ingress.alb_name | quote }}
     alb.ingress.kubernetes.io/scheme: {{ .Values.ingress.scheme | quote }}
     alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.group_name | quote }}
-    alb.ingress.kubernetes.io/group.order: '20'
     {{- range $key, $value := .Values.ingress.healthcheck }}
     alb.ingress.kubernetes.io/{{ $key }}: {{ $value | quote }}
     {{- end }}
