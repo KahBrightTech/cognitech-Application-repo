@@ -40,17 +40,17 @@ spec:
           image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.frontend.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - containerPort: 80
+            - containerPort: {{ .Values.frontend.service.port }}
           readinessProbe:
             httpGet:
               path: /health
-              port: 80
+              port: {{ .Values.frontend.service.port }}
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /health
-              port: 80
+              port: {{ .Values.frontend.service.port }}
             initialDelaySeconds: 10
             periodSeconds: 20
           resources:

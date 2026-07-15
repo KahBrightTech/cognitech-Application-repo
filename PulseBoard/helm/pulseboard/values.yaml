@@ -24,6 +24,7 @@ backend:
   service:
     type: ClusterIP
     port: 4000
+    targetPort: 4000
   env:
     PORT: "4000"
     CORS_ORIGIN: "*"
@@ -44,6 +45,7 @@ frontend:
   service:
     type: NodePort # ClusterIP | NodePort | LoadBalancer
     port: 80
+    targetPort: 80
     nodePort: 30080 # used only when service.type == NodePort
   resources:
     requests:

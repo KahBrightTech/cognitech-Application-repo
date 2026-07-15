@@ -13,4 +13,4 @@ spec:
     component: {{ .Values.backend.component }}
   ports:
     - port: {{ .Values.backend.service.port }}
-      targetPort: {{ .Values.backend.service.port }}
+      targetPort: {{ .Values.backend.service.targetPort }}
