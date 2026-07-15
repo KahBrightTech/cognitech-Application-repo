@@ -4,10 +4,7 @@ metadata:
   name: {{ .Values.global.storage.ClassName }}
 provisioner: ebs.csi.aws.com 
 parameters:
-  type: {{ .Values.global.storage.type }}
-  iops: {{ .Values.global.storage.iops }}
-  throughput: {{ .Values.global.storage.throughput }}
-  encrypted: {{ .Values.global.storage.encrypted }}
+  {{- toYaml .Values.global.storage.parameters | nindent 2 }}
 volumeBindingMode: WaitForFirstConsumer 
 allowVolumeExpansion: {{ .Values.global.storage.allowVolumeExpansion }} 
 reclaimPolicy: {{ .Values.global.storage.reclaimPolicy }} 

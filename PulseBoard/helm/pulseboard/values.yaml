@@ -8,12 +8,16 @@ global:
   appLabel: pulseboard
   storage:
     ClassName: fast-ssd
-    type: gp3
-    iops: "3000"
-    throughput: "125"
-    encrypted: "true"
     reclaimPolicy: Delete
     allowVolumeExpansion: true
+    # Passed straight through to StorageClass.parameters via toYaml, so every
+    # value here MUST be quoted - the K8s API requires parameters to be
+    # strings, even ones that look like numbers or booleans (e.g. "3000", "true").
+    parameters:
+      type: "gp3"
+      iops: "3000"
+      throughput: "125"
+      encrypted: "true"
 
 image:
   # Full ECR registry host + repository. Both components share this repo and
