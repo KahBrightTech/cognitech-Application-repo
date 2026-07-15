@@ -1,7 +1,7 @@
 # Frontend: Pod + NodePort Service.
 # An initContainer waits for the backend's /health endpoint before nginx
 # starts, so the pod won't crash on "host not found in upstream" and the
-# backend is guaranteed to be up first.
+# backend is guaranteed to be up first. 
 apiVersion: apps/v1
 kind: Deployment
 metadata:

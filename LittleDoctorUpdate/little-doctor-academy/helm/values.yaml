@@ -1,7 +1,6 @@
 # Default values for the LittleDoctor chart.
 # Override at deploy time (e.g. via --set or a values-<env>.yaml file).
 # ALL tunable settings live in this file - templates contain no hardcoded values.
-
 global:
   # Namespace to deploy into. Overridden by the workflow's namespace input.
   namespace: healthpath
