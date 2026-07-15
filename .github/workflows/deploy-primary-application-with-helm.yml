@@ -1,4 +1,4 @@
-name: Deploy-application-with-helm-v2
+name: Deploy-primary-application-with-helm
 
 # =============================================================================
 # Generic Helm deployment workflow.
