@@ -5,7 +5,7 @@ global:
   # Namespace to deploy into. Overridden by the workflow's namespace input.
   namespace: pulseboard
   # Common "app" label used in selectors and pod labels for every component.
-  appLabel: pulseboard
+  appLabel: infogrid
   storage:
     pvcName: front-end-storage
     size: 30Gi
@@ -30,6 +30,11 @@ global:
       welcome_message: "Hello from ConfigMap"
       feature_beta: "true"
       cache_ttl: "3600"
+  secrets:
+    name: db_secrets
+    k8s_secret_name: pulseboard-secrets
+    ansible_secrets: int-production-use1-ansible-authentication20260420023501360700000001
+    smtp_secrets: int-production-use1-smtp-credentials20260420023501369000000005
 image:
   # Full ECR registry host + repository. Both components share this repo and
   # are distinguished by their image tag (see backend.image.tag / frontend.image.tag).
