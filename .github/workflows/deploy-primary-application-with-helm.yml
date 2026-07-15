@@ -281,6 +281,21 @@ jobs:
             --wait \
             --timeout 10m
 
+      # The chart's IngressClass carries helm.sh/resource-policy: keep, so the
+      # uninstall above intentionally leaves it behind - deleting it as part
+      # of that step risks a deadlock: the ALB Ingress Controller checks the
+      # IngressClass still exists as part of tearing down each Ingress's AWS
+      # resources, so removing it mid-uninstall can leave the Ingress stuck
+      # Terminating forever. Deleting it here, after the uninstall has fully
+      # finished, is safe since nothing still depends on it by this point.
+      - name: Delete IngressClass
+        if: inputs.action == 'uninstall'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl delete ingressclass pulseboard-ingress --ignore-not-found
+
       - name: Verify deployment
         if: inputs.action == 'deploy' && inputs.dry_run == false
         shell: bash
