@@ -78,6 +78,24 @@ frontend:
     port: 80
     targetPort: 80
     nodePort: 30080 # used only when service.type == NodePort
+  # Separate public-facing NLB Service, in addition to the internal Service
+  # above. Selects the same pods, provisioned via the AWS Load Balancer
+  # Controller (not the legacy in-tree "nlb" annotation value).
+  nlb:
+    enabled: true
+    name: pulseboard-frontend-nlb
+    scheme: internet-facing # internet-facing | internal
+    targetType: ip # ip | instance
+    targetPort: 80
+    # Pre-existing security group(s) to attach - must already allow inbound
+    # 80/443 from the internet and allow the NLB to reach targetPort on pods.
+    # securityGroups: "sg-0bd53c5ed91aa0a94"
+    # ACM certificate ARN for TLS termination at the NLB (port 443 only).
+    sourceRanges: "0.0.0.0/0"
+    certificateArn: "arn:aws:acm:us-east-1:271457809232:certificate/31b4636f-d7d5-4109-80f2-6892489df997"
+    # Hostname ExternalDNS will create a Route53 record for, pointing at
+    # this NLB's hostname once it's provisioned.
+    hostname: "pulseboard.prod.novutechnologies.net"
   resources:
     requests:
       cpu: 25m
