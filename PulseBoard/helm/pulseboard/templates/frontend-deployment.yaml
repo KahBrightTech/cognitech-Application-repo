@@ -58,7 +58,34 @@ spec:
           volumeMounts:
             - name: {{ .Values.global.storage.pvcName }}
               mountPath: {{ .Values.global.storage.mountPath }}
+            - name: {{ .Values.global.configmap.name }}
+              mountPath: /etc/config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.global.configmap.name }}
+                  key: DATABASE_URL
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.global.configmap.name }}
+                  key: LOG_LEVEL
+            - name: MAX_CONNECTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.global.configmap.name }}
+                  key: MAX_CONNECTIONS
+          envFrom:
+          - configMapRef:
+              name: {{ .Values.global.configmap.name }}
       volumes:
         - name: {{ .Values.global.storage.pvcName }}
           persistentVolumeClaim:
             claimName: {{ .Values.global.storage.pvcName }}
+        - name: {{ .Values.global.configmap.name }}
+          configMap:
+            name: {{ .Values.global.configmap.name }}
+            items: 
+            - key: app.properties
+              path: app.properties

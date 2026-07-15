@@ -21,7 +21,15 @@ global:
       iops: "3000"
       throughput: "125"
       encrypted: "true"
-
+  configmap:
+    name: app-config
+    db_url: "postgres://db.example.com:5432"
+    log_level: "debug"
+    max_connection: "100"
+    app_properties:
+      welcome_message: "Hello from ConfigMap"
+      feature_beta: "true"
+      cache_ttl: "3600"
 image:
   # Full ECR registry host + repository. Both components share this repo and
   # are distinguished by their image tag (see backend.image.tag / frontend.image.tag).
