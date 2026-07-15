@@ -227,6 +227,7 @@ jobs:
             "${{ inputs.release_name }}"
             "${CHART_PATH}"
             --namespace "${{ inputs.namespace }}"
+            --create-namespace
             --set-string "global.namespace=${{ inputs.namespace }}"
             --set-string "image.registry=${IMAGE_REGISTRY}"
             --set-string "image.repository=${ECR_REPOSITORY}"

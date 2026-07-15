@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: front-end-storage
+  name: {{ .Values.global.storage.pvcName }}
   namespace: {{ .Values.global.namespace }}
 spec:
   accessModes:

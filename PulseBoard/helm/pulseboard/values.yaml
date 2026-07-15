@@ -7,6 +7,7 @@ global:
   # Common "app" label used in selectors and pod labels for every component.
   appLabel: pulseboard
   storage:
+    pvcName: front-end-storage
     size: 30Gi
     ClassName: fast-ssd
     reclaimPolicy: Delete
