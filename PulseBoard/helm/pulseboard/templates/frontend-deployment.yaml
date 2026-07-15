@@ -60,9 +60,6 @@ spec:
               mountPath: {{ .Values.global.storage.mountPath }}
             - name: {{ .Values.global.configmap.name }}
               mountPath: /etc/config
-            - name: {{ .Values.global.secrets.k8s_secret_name }}
-              mountPath: /etc/k8s/secrets
-              readOnly: true
             - name: {{ .Values.global.secrets.name }}
               mountPath: /etc/secrets
               readOnly: true
@@ -95,9 +92,6 @@ spec:
             items: 
             - key: app.properties
               path: app.properties
-        - name: {{ .Values.global.secrets.k8s_secret_name }}
-          mountPath: /etc/secrets
-          readOnly: true
         - name: {{ .Values.global.secrets.name }}
           csi:
             driver: secrets-store.csi.k8s.io
