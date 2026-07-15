@@ -6,6 +6,14 @@ global:
   namespace: pulseboard
   # Common "app" label used in selectors and pod labels for every component.
   appLabel: pulseboard
+  storage:
+    ClassName: fast-ssd
+    type: gp3
+    iops: "3000"
+    throughput: "125"
+    encrypted: "true"
+    reclaimPolicy: Delete
+    allowVolumeExpansion: true
 
 image:
   # Full ECR registry host + repository. Both components share this repo and
