@@ -2,32 +2,42 @@
 # An initContainer waits for the backend's /health endpoint before nginx
 # starts, so the pod won't crash on "host not found in upstream" and the
 # backend is guaranteed to be up first.
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: littledoctor-frontend
   namespace: __NAMESPACE__
   labels:
     app: littledoctor
     component: frontend
-  containers:
-  - name: frontend
-    # Image is templated: __REGISTRY__ and __VERSION__ are injected by the
-    # deploy-to-eks workflow from the ECR URL + version you choose.
-    image: littledoctor-little-doctor-academy-v1.0.1
+  spec:
+    replicas: 2
+    selector:
+      matchLabels:
+        app: littledoctor
+        component: frontend
+    template:
+      metadata:
+        labels:
+          app: littledoctor
+          component: frontend
+      spec:
+        containers:
+        - name: frontend
+    image: littledoctor-little-doctor-academy-v1.0.2
     imagePullPolicy: Always
     ports:
-    - containerPort: 80
+    - containerPort: 8080
     readinessProbe:
       httpGet:
         path: /healthz
-        port: 80
+        port: 8080
       initialDelaySeconds: 5
       periodSeconds: 10
     livenessProbe:
       httpGet:
         path: /healthz
-        port: 80
+        port: 8080
       initialDelaySeconds: 10
       periodSeconds: 20
     resources:

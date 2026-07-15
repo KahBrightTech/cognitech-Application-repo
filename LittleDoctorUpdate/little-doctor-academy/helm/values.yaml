@@ -22,7 +22,6 @@ frontend:
   image:
     tag: littledoctor-little-doctor-academy-v1.0.1
   # Port the nginx container listens on (Dockerfile EXPOSE / nginx.conf "listen 8080").
-  # nginx-unprivileged cannot bind ports below 1024.
   containerPort: 8080
   service:
     type: NodePort # ClusterIP | NodePort | LoadBalancer
