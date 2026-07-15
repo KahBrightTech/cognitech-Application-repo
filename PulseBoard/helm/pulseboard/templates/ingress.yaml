@@ -8,6 +8,7 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/load-balancer-name: {{ .Values.ingress.alb_name | quote }}
     alb.ingress.kubernetes.io/scheme: {{ .Values.ingress.scheme | quote }}
+    alb.ingress.kubernetes.io/target-type: {{ .Values.ingress.target_type | quote }}
     # Shared with the api Ingress so both provision onto the same ALB.
     alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.group_name | quote }}
     # Loops through all health check values

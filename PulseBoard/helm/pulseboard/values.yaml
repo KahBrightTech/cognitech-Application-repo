@@ -51,6 +51,10 @@ ingress:
   alb_name: pulseboard-alb
   scheme: internet-facing
   controller: ingress.k8s.aws/alb
+  # ip = register pod IPs directly as ALB targets (via VPC CNI), same as the
+  # NLB's targetType above. instance (the ALB default) would hop through the
+  # node's NodePort + kube-proxy instead.
+  target_type: ip
   # Both this Ingress and the api one share this group.name, so they're
   # provisioned onto the SAME ALB instead of one each.
   group_name: pulseboard-shared-alb
