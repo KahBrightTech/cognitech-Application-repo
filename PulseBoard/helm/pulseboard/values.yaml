@@ -31,7 +31,7 @@ global:
       feature_beta: "true"
       cache_ttl: "3600"
   secrets:
-    name: db_secrets
+    name: db-secrets
     k8s_secret_name: pulseboard-secrets
     ansible_secrets: int-production-use1-ansible-authentication20260420023501360700000001
     smtp_secrets: int-production-use1-smtp-credentials20260420023501369000000005
