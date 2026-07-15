@@ -115,7 +115,7 @@ jobs:
           # A path is "code" unless it's docs/markdown/images.
           is_code() {
             case "$1" in
-              *.md|*.markdown|*.rst|*.adoc|*/docs/*|*LICENSE*|*.png|*.jpg|*.jpeg|*.gif|*.svg|*.ico) return 1 ;;
+              *.md|*.markdown|*.rst|*.adoc|*/docs/*|*/helm/*|*/k8s/*|*LICENSE*|*.png|*.jpg|*.jpeg|*.gif|*.svg|*.ico) return 1 ;;
               *) return 0 ;;
             esac
           }
