@@ -45,6 +45,25 @@ image:
   repository: int-production-use1-ecs
   pullPolicy: Always
 
+ingress:
+  ingressclassname: pulseboard-ingress
+  ingressname: pulseboard-ingress
+  alb_name: pulseboard-alb
+  scheme: internet-facing
+  controller: ingress.k8s.aws/alb
+  healthcheck:
+    healthcheck-protocol: "HTTP"
+    healthcheck-port: "traffic-port"
+    healthcheck-path: "/health"
+    healthcheck-interval-seconds: "15"
+    healthcheck-timeout-seconds: "5"
+    success-codes: "200"
+    healthy-threshold-count: "2"
+    unhealthy-threshold-count: "2"
+  alb_certificate_arn: "arn:aws:acm:us-east-1:271457809232:certificate/31b4636f-d7d5-4109-80f2-6892489df997"
+  listenning_ports: '[{"HTTPS":443}, {"HTTP":80}]'
+  hostname: "pb.prod.novutechnologies.net"
+
 backend:
   name: pulseboard-backend
   component: backend # value for the "component" label / selector
