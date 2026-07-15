@@ -11,22 +11,19 @@ on:
   workflow_dispatch:
     inputs:
       chart_path:
-        description: 'Exact path to the Helm chart directory containing Chart.yaml'
+        description: 'Exact path to the Helm chart directory containing Chart.yaml ex LittleDoctorUpdate/little-doctor-academy/helm'
         required: true
         type: string
-        default: 'LittleDoctorUpdate/little-doctor-academy/helm'
 
       release_name:
         description: 'Helm release name'
         required: true
         type: string
-        default: 'little-doctor-academy'
 
       namespace:
         description: 'Existing target Kubernetes namespace'
         required: true
         type: string
-        default: 'little-doctor'
 
       include_backend:
         description: 'Deploy the backend component'
