@@ -18,6 +18,7 @@ spec:
         app: {{ .Values.global.appLabel }}
         component: {{ .Values.frontend.component }}
     spec:
+      serviceAccountName: {{ .Values.global.serviceAccounts.secretAccess }}
       {{- if .Values.frontend.waitForBackend.enabled }}
       initContainers:
         - name: wait-for-backend

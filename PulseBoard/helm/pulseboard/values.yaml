@@ -6,6 +6,10 @@ global:
   namespace: pulseboard
   # Common "app" label used in selectors and pod labels for every component.
   appLabel: pulseboard
+  # Pre-existing ServiceAccount (created outside this chart) annotated with an
+  # IAM role for IRSA, so the Secrets Store CSI driver can authenticate to AWS.
+  serviceAccounts:
+    secretAccess: secret-access
   storage:
     pvcName: front-end-storage
     size: 30Gi
