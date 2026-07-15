@@ -1,0 +1,48 @@
+# Default values for the LittleDoctor chart.
+# Override at deploy time (e.g. via --set or a values-<env>.yaml file).
+# ALL tunable settings live in this file - templates contain no hardcoded values.
+
+global:
+  # Namespace to deploy into. Overridden by the workflow's namespace input.
+  namespace: healthpath
+  # Common "app" label used in selectors and pod labels for every component.
+  appLabel: littledoctor
+
+image:
+  # Full ECR registry host + repository. Components share this repo and
+  # are distinguished by their image tag (see frontend.image.tag).
+  registry: 271457809232.dkr.ecr.us-east-1.amazonaws.com
+  repository: int-production-use1-ecs
+  pullPolicy: Always
+
+frontend:
+  name: littledoctor
+  component: frontend # value for the "component" label / selector
+  replicaCount: 2
+  image:
+    tag: littledoctor-little-doctor-academy-v1.0.1
+  # Port the nginx container listens on (Dockerfile EXPOSE / nginx.conf "listen 8080").
+  # nginx-unprivileged cannot bind ports below 1024.
+  containerPort: 8080
+  service:
+    type: NodePort # ClusterIP | NodePort | LoadBalancer
+    port: 80
+    nodePort: 30080 # used only when service.type == NodePort
+    targetPort: 8080 # must match frontend.containerPort
+  # Health endpoint served by nginx (nginx.conf "location = /healthz").
+  probes:
+    readiness:
+      path: /healthz
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    liveness:
+      path: /healthz
+      initialDelaySeconds: 10
+      periodSeconds: 20
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

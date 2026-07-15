@@ -1,0 +1,57 @@
+# Frontend: Pod + NodePort Service.
+# An initContainer waits for the backend's /health endpoint before nginx
+# starts, so the pod won't crash on "host not found in upstream" and the
+# backend is guaranteed to be up first.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: littledoctor-frontend
+  namespace: __NAMESPACE__
+  labels:
+    app: littledoctor
+    component: frontend
+  containers:
+  - name: frontend
+    # Image is templated: __REGISTRY__ and __VERSION__ are injected by the
+    # deploy-to-eks workflow from the ECR URL + version you choose.
+    image: littledoctor-little-doctor-academy-v1.0.1
+    imagePullPolicy: Always
+    ports:
+    - containerPort: 80
+    readinessProbe:
+      httpGet:
+        path: /healthz
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 80
+      initialDelaySeconds: 10
+      periodSeconds: 20
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: littledoctor-frontend
+  namespace: __NAMESPACE__
+  labels:
+    app: littledoctor
+    component: frontend
+spec:
+  type: NodePort
+  selector:
+    app: littledoctor
+    component: frontend
+  ports:
+  - port: 80
+    targetPort: 8080
+    nodePort: 30080 # access the UI at http://<node-external-ip>:30080

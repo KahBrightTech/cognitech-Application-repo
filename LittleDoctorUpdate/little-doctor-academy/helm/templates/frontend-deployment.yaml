@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "littledoctor.labels" . | nindent 4 }}
+    component: {{ .Values.frontend.component }}
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.global.appLabel }}
+      component: {{ .Values.frontend.component }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.global.appLabel }}
+        component: {{ .Values.frontend.component }}
+    spec:
+      containers:
+        - name: frontend
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.containerPort }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.frontend.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.frontend.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.frontend.probes.readiness.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.frontend.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.frontend.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.frontend.probes.liveness.periodSeconds }}
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
