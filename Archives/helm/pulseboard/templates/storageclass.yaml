@@ -1,0 +1,10 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.global.storage.ClassName }}
+provisioner: ebs.csi.aws.com 
+parameters:
+  {{- toYaml .Values.global.storage.parameters | nindent 2 }}
+volumeBindingMode: WaitForFirstConsumer 
+allowVolumeExpansion: {{ .Values.global.storage.allowVolumeExpansion }} 
+reclaimPolicy: {{ .Values.global.storage.reclaimPolicy }} 

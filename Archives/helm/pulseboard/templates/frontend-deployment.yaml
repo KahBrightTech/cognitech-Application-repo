@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "pulseboard.labels" . | nindent 4 }}
+    component: {{ .Values.frontend.component }}
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.global.appLabel }}
+      component: {{ .Values.frontend.component }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.global.appLabel }}
+        component: {{ .Values.frontend.component }}
+    spec:
+      serviceAccountName: {{ .Values.global.serviceAccounts.secretAccess }}
+      {{- if .Values.frontend.waitForBackend.enabled }}
+      initContainers:
+        - name: wait-for-backend
+          image: {{ .Values.frontend.waitForBackend.image }}
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for backend to become ready..."
+              until wget -qO- http://{{ .Values.backend.name }}:{{ .Values.backend.service.port }}/health >/dev/null 2>&1; do
+                echo "  backend not ready yet, retrying in 3s..."
+                sleep 3
+              done
+              echo "backend is up - starting frontend"
+          resources:
+            {{- toYaml .Values.frontend.waitForBackend.resources | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: frontend
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.frontend.service.port }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.frontend.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.frontend.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+          volumeMounts:
+            - name: {{ .Values.global.storage.pvcName }}
+              mountPath: {{ .Values.global.storage.mountPath }}
+            - name: {{ .Values.global.configmap.name }}
+              mountPath: /etc/config
+            - name: {{ .Values.global.secrets.name }}
+              mountPath: /etc/secrets
+              readOnly: true
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.global.configmap.name }}
+                  key: DATABASE_URL
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.global.configmap.name }}
+                  key: LOG_LEVEL
+            - name: MAX_CONNECTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.global.configmap.name }}
+                  key: MAX_CONNECTIONS
+          envFrom:
+          - configMapRef:
+              name: {{ .Values.global.configmap.name }}
+      volumes:
+        - name: {{ .Values.global.storage.pvcName }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.global.storage.pvcName }}
+        - name: {{ .Values.global.configmap.name }}
+          configMap:
+            name: {{ .Values.global.configmap.name }}
+            items: 
+            - key: app.properties
+              path: app.properties
+        - name: {{ .Values.global.secrets.name }}
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: "{{ .Values.global.secrets.name }}"

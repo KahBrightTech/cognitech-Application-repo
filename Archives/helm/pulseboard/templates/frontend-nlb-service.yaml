@@ -1,0 +1,38 @@
+{{- if .Values.frontend.nlb.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.frontend.nlb.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "pulseboard.labels" . | nindent 4 }}
+    component: {{ .Values.frontend.component }}
+  annotations:
+    # "external" (not the legacy "nlb") hands this Service to the AWS Load
+    # Balancer Controller instead of the deprecated in-tree cloud provider.
+    service.beta.kubernetes.io/aws-load-balancer-type: "external"
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: {{ .Values.frontend.nlb.targetType | quote }}
+    service.beta.kubernetes.io/aws-load-balancer-scheme: {{ .Values.frontend.nlb.scheme | quote }}
+    # Commented out: not using a pre-existing SG here - the controller
+    # auto-creates and manages both frontend and backend (node-side) security
+    # groups instead. See sourceRanges below for restricting inbound access.
+    # service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-REPLACE_ME"
+    service.beta.kubernetes.io/aws-load-balancer-source-ranges: {{ .Values.frontend.nlb.sourceRanges | quote }}
+    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: {{ .Values.frontend.nlb.certificateArn | quote }}
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
+    # ExternalDNS watches for this annotation and creates/updates the Route53
+    # record to point at the NLB's hostname once it's provisioned.
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.frontend.nlb.hostname | quote }}
+spec:
+  type: LoadBalancer
+  selector:
+    app: {{ .Values.global.appLabel }}
+    component: {{ .Values.frontend.component }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: {{ .Values.frontend.nlb.targetPort }}
+    - name: https
+      port: 443
+      targetPort: {{ .Values.frontend.nlb.targetPort }}
+{{- end }}

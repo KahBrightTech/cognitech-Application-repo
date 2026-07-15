@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.global.configmap.name }}
+  namespace: {{ .Values.global.namespace }}
+data:
+  DATABASE_URL: "{{ .Values.global.configmap.db_url }}"
+  LOG_LEVEL: "{{ .Values.global.configmap.log_level }}"
+  MAX_CONNECTIONS: "{{ .Values.global.configmap.max_connection }}"
+  # A whole config file (mounted as a file into the pod)
+  app.properties: |
+    welcome.message={{ .Values.global.configmap.app_properties.welcome_message }}
+    feature.beta={{ .Values.global.configmap.app_properties.feature_beta }}
+    cache.ttl={{ .Values.global.configmap.app_properties.cache_ttl }}

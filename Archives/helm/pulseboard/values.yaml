@@ -1,0 +1,146 @@
+# Default values for the PulseBoard chart.
+# Override at deploy time (e.g. via --set or a values-<env>.yaml file).
+
+global:
+  # Namespace to deploy into. Overridden by the workflow's namespace input.
+  namespace: pulseboard
+  # Common "app" label used in selectors and pod labels for every component.
+  appLabel: pulseboard
+  # Pre-existing ServiceAccount (created outside this chart) annotated with an
+  # IAM role for IRSA, so the Secrets Store CSI driver can authenticate to AWS.
+  serviceAccounts:
+    secretAccess: secret-access
+  storage:
+    pvcName: front-end-storage
+    size: 30Gi
+    mountPath: /var/cache/nginx
+    ClassName: fast-ssd
+    reclaimPolicy: Delete
+    allowVolumeExpansion: true
+    # Passed straight through to StorageClass.parameters via toYaml, so every
+    # value here MUST be quoted - the K8s API requires parameters to be
+    # strings, even ones that look like numbers or booleans (e.g. "3000", "true").
+    parameters:
+      type: "gp3"
+      iops: "3000"
+      throughput: "125"
+      encrypted: "true"
+  configmap:
+    name: app-config
+    db_url: "postgres://db.example.com:5432"
+    log_level: "debug"
+    max_connection: "100"
+    app_properties:
+      welcome_message: "Hello from ConfigMap"
+      feature_beta: "true"
+      cache_ttl: "3600"
+  secrets:
+    name: db-secrets # This does not accept underscores
+    ansible_secrets: int-production-use1-ansible-authentication20260420023501360700000001
+    smtp_secrets: int-production-use1-smtp-credentials20260420023501369000000005
+image:
+  # Full ECR registry host + repository. Both components share this repo and
+  # are distinguished by their image tag (see backend.image.tag / frontend.image.tag).
+  registry: 271457809232.dkr.ecr.us-east-1.amazonaws.com
+  repository: int-production-use1-ecs
+  pullPolicy: Always
+
+ingress:
+  ingressclassname: pulseboard-ingress
+  ingressname: pulseboard-ingress
+  alb_name: pulseboard-alb
+  scheme: internet-facing
+  controller: ingress.k8s.aws/alb
+  # Both this Ingress and the api one share this group.name, so they're
+  # provisioned onto the SAME ALB instead of one each.
+  group_name: pulseboard-shared-alb
+  healthcheck:
+    healthcheck-protocol: "HTTP"
+    healthcheck-port: "traffic-port"
+    healthcheck-path: "/health"
+    healthcheck-interval-seconds: "15"
+    healthcheck-timeout-seconds: "5"
+    success-codes: "200"
+    healthy-threshold-count: "2"
+    unhealthy-threshold-count: "2"
+  alb_certificate_arn: "arn:aws:acm:us-east-1:271457809232:certificate/31b4636f-d7d5-4109-80f2-6892489df997"
+  listenning_ports: '[{"HTTPS":443}, {"HTTP":80}]'
+  hostname: "pb.prod.novutechnologies.net"
+  accounthostname: "pulseboardinternal.prod.novutechnologies.net"
+  # Dedicated Ingress + listener for direct backend/API access on port 4000.
+  # Separate listen-ports on a shared-group Ingress creates its own listener
+  # on the same ALB, keeping its rules independent from the 80/443 ones above.
+  api:
+    ingressname: pulseboard-api-ingress
+    listenning_ports: '[{"HTTP":4000}]'
+
+backend:
+  name: pulseboard-backend
+  component: backend # value for the "component" label / selector
+  replicaCount: 1
+  image:
+    # Full tag within the shared repo, e.g. pulseboard-backend-v1.0.2
+    tag: pulseboard-backend-latest
+  service:
+    type: ClusterIP
+    port: 4000
+    targetPort: 4000
+  env:
+    PORT: "4000"
+    CORS_ORIGIN: "*"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+frontend:
+  name: pulseboard-frontend
+  component: frontend # value for the "component" label / selector
+  replicaCount: 1
+  image:
+    tag: pulseboard-frontend-latest
+  service:
+    type: NodePort # ClusterIP | NodePort | LoadBalancer
+    port: 80
+    targetPort: 80
+    nodePort: 30080 # used only when service.type == NodePort
+  # Separate public-facing NLB Service, in addition to the internal Service
+  # above. Selects the same pods, provisioned via the AWS Load Balancer
+  # Controller (not the legacy in-tree "nlb" annotation value).
+  nlb:
+    enabled: true
+    name: pulseboard-frontend-nlb
+    scheme: internet-facing # internet-facing | internal
+    targetType: ip # ip | instance
+    targetPort: 80
+    # Pre-existing security group(s) to attach - must already allow inbound
+    # 80/443 from the internet and allow the NLB to reach targetPort on pods.
+    # securityGroups: "sg-0bd53c5ed91aa0a94"
+    # ACM certificate ARN for TLS termination at the NLB (port 443 only).
+    sourceRanges: "0.0.0.0/0"
+    certificateArn: "arn:aws:acm:us-east-1:271457809232:certificate/31b4636f-d7d5-4109-80f2-6892489df997"
+    # Hostname ExternalDNS will create a Route53 record for, pointing at
+    # this NLB's hostname once it's provisioned.
+    hostname: "pulseboard.prod.novutechnologies.net"
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+  # initContainer that blocks nginx until the backend /health responds, so the
+  # frontend never starts before the backend (and won't crash on DNS lookup).
+  waitForBackend:
+    enabled: true
+    image: busybox:1.36
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 50m
+        memory: 32Mi
