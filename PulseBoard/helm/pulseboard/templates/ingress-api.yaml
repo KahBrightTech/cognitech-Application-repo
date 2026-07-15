@@ -12,6 +12,7 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/load-balancer-name: {{ .Values.ingress.alb_name | quote }}
     alb.ingress.kubernetes.io/scheme: {{ .Values.ingress.scheme | quote }}
+    alb.ingress.kubernetes.io/target-type: {{ .Values.ingress.target_type | quote }}
     alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.group_name | quote }}
     {{- range $key, $value := .Values.ingress.healthcheck }}
     alb.ingress.kubernetes.io/{{ $key }}: {{ $value | quote }}
