@@ -1,0 +1,402 @@
+name: Deploy-application-with-helm
+
+# =============================================================================
+# Generic Helm-based deployment workflow.
+#
+# This workflow:
+#   - Does not build images.
+#   - Deploys image versions that already exist in Amazon ECR.
+#   - Supports backend and frontend image tags.
+#   - Supports deploy, rollback, uninstall, and dry-run operations.
+#
+# Expected Helm values:
+#   image.registry
+#   image.repository
+#   global.namespace
+#   backend.image.tag
+#   frontend.image.tag
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'Application name / image-tag prefix, for example pulseboard'
+        required: true
+        type: string
+        default: 'pulseboard'
+
+      chart_path:
+        description: 'Helm chart path relative to the ./helm directory'
+        required: true
+        type: string
+        default: 'PulseBoard/helm/pulseboard'
+
+      release_name:
+        description: 'Helm release name'
+        required: true
+        type: string
+        default: 'pulseboard'
+
+      namespace:
+        description: 'Existing target Kubernetes namespace'
+        required: true
+        type: string
+        default: 'pulseboard'
+
+      version:
+        description: 'Image version, for example v1.0.2 or latest'
+        required: true
+        type: string
+        default: 'latest'
+
+      image_name:
+        description: 'Base image name used when deriving component tags'
+        required: true
+        type: string
+        default: 'pulseboard'
+
+      include_backend:
+        description: 'Deploy the backend component'
+        required: false
+        type: boolean
+        default: true
+
+      backend_tag:
+        description: 'Optional explicit backend tag. Empty derives <image-name>-backend-<version>'
+        required: false
+        type: string
+        default: ''
+
+      include_frontend:
+        description: 'Deploy the frontend component'
+        required: false
+        type: boolean
+        default: true
+
+      frontend_tag:
+        description: 'Optional explicit frontend tag. Empty derives <image-name>-frontend-<version>'
+        required: false
+        type: string
+        default: ''
+
+      values_file:
+        description: 'Optional values file relative to the repository root'
+        required: false
+        type: string
+        default: ''
+
+      action:
+        description: 'Deployment action'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - rollback
+          - uninstall
+        default: deploy
+
+      dry_run:
+        description: 'Render the Helm deployment without applying it'
+        required: false
+        type: boolean
+        default: false
+
+      aws_region:
+        description: 'AWS region'
+        required: false
+        type: string
+        default: 'us-east-1'
+
+      ecr_repository:
+        description: 'Amazon ECR repository name'
+        required: false
+        type: string
+        default: 'int-production-use1-ecs'
+
+      image_registry:
+        description: 'Amazon ECR registry hostname'
+        required: false
+        type: string
+        default: '271457809232.dkr.ecr.us-east-1.amazonaws.com'
+
+      eks_cluster:
+        description: 'Target Amazon EKS cluster name'
+        required: false
+        type: string
+        default: 'int-production-use1-prod-novutech-eks-cluster'
+
+      iam_role:
+        description: 'IAM role ARN assumed by GitHub Actions through OIDC'
+        required: false
+        type: string
+        default: 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role'
+
+env:
+  AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+  ECR_REPOSITORY: ${{ inputs.ecr_repository || 'int-production-use1-ecs' }}
+  IMAGE_REGISTRY: ${{ inputs.image_registry || '271457809232.dkr.ecr.us-east-1.amazonaws.com' }}
+  EKS_CLUSTER_NAME: ${{ inputs.eks_cluster || 'int-production-use1-prod-novutech-eks-cluster' }}
+  IAM_ROLE: ${{ inputs.iam_role || 'arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role' }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ inputs.action }} ${{ inputs.release_name }} ${{ inputs.version }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE }}
+          role-session-name: GitHubActions-Helm-${{ inputs.app_name }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Update kubeconfig
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          aws eks update-kubeconfig \
+            --name "${EKS_CLUSTER_NAME}" \
+            --region "${AWS_REGION}"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      # -----------------------------------------------------------------------
+      # Resolve the chart path and component image tags once.
+      # -----------------------------------------------------------------------
+      - name: Resolve deployment values
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RAW_CHART_PATH="${{ inputs.chart_path }}"
+
+          # Allow either:
+          #   PulseBoard/helm/pulseboard
+          # or:
+          #   ./helm/PulseBoard/helm/pulseboard
+          #
+          # If the supplied value already starts with ./ or helm/, use it as-is.
+          # Otherwise, prepend ./helm/.
+          if [[ "${RAW_CHART_PATH}" == ./* || "${RAW_CHART_PATH}" == helm/* ]]; then
+            CHART_PATH="${RAW_CHART_PATH}"
+          else
+            CHART_PATH="./helm/${RAW_CHART_PATH}"
+          fi
+
+          IMAGE_NAME="${{ inputs.image_name }}"
+          VERSION="${{ inputs.version }}"
+
+          BACKEND_TAG="${{ inputs.backend_tag }}"
+          if [[ -z "${BACKEND_TAG}" ]]; then
+            BACKEND_TAG="${IMAGE_NAME}-backend-${VERSION}"
+          fi
+
+          FRONTEND_TAG="${{ inputs.frontend_tag }}"
+          if [[ -z "${FRONTEND_TAG}" ]]; then
+            FRONTEND_TAG="${IMAGE_NAME}-frontend-${VERSION}"
+          fi
+
+          echo "CHART_PATH=${CHART_PATH}" >> "${GITHUB_ENV}"
+          echo "BACKEND_TAG=${BACKEND_TAG}" >> "${GITHUB_ENV}"
+          echo "FRONTEND_TAG=${FRONTEND_TAG}" >> "${GITHUB_ENV}"
+
+          echo "Chart path: ${CHART_PATH}"
+          echo "Backend tag: ${BACKEND_TAG}"
+          echo "Frontend tag: ${FRONTEND_TAG}"
+
+          if [[ "${{ inputs.action }}" == "deploy" && ! -f "${CHART_PATH}/Chart.yaml" ]]; then
+            echo "Chart.yaml was not found at ${CHART_PATH}/Chart.yaml"
+            echo
+            echo "Available Chart.yaml files:"
+            find . -type f -name Chart.yaml -print || true
+            exit 1
+          fi
+
+          if [[ -n "${{ inputs.values_file }}" && ! -f "${{ inputs.values_file }}" ]]; then
+            echo "Values file was not found: ${{ inputs.values_file }}"
+            exit 1
+          fi
+
+      # -----------------------------------------------------------------------
+      # Verify requested image tags exist in ECR.
+      # -----------------------------------------------------------------------
+      - name: Verify images exist in ECR
+        if: inputs.action == 'deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_image_tag() {
+            local tag="$1"
+
+            echo "Checking for ECR image tag: ${tag}"
+
+            if aws ecr describe-images \
+              --repository-name "${ECR_REPOSITORY}" \
+              --region "${AWS_REGION}" \
+              --image-ids "imageTag=${tag}" \
+              >/dev/null 2>&1; then
+              echo "Found ${tag}"
+            else
+              echo "${tag} was not found in ECR repository ${ECR_REPOSITORY}."
+              echo "Build and push the image before deploying it."
+              exit 1
+            fi
+          }
+
+          if [[ "${{ inputs.include_backend }}" == "true" ]]; then
+            check_image_tag "${BACKEND_TAG}"
+          fi
+
+          if [[ "${{ inputs.include_frontend }}" == "true" ]]; then
+            check_image_tag "${FRONTEND_TAG}"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Deploy using Helm.
+      # -----------------------------------------------------------------------
+      - name: Deploy with Helm
+        if: inputs.action == 'deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          HELM_ARGS=(
+            upgrade
+            --install
+            "${{ inputs.release_name }}"
+            "${CHART_PATH}"
+            --namespace "${{ inputs.namespace }}"
+            --set-string "global.namespace=${{ inputs.namespace }}"
+            --set-string "image.registry=${IMAGE_REGISTRY}"
+            --set-string "image.repository=${ECR_REPOSITORY}"
+            --wait
+            --timeout 10m
+          )
+
+          if [[ "${{ inputs.include_backend }}" == "true" ]]; then
+            echo "Backend image tag: ${BACKEND_TAG}"
+            HELM_ARGS+=(--set-string "backend.image.tag=${BACKEND_TAG}")
+          fi
+
+          if [[ "${{ inputs.include_frontend }}" == "true" ]]; then
+            echo "Frontend image tag: ${FRONTEND_TAG}"
+            HELM_ARGS+=(--set-string "frontend.image.tag=${FRONTEND_TAG}")
+          fi
+
+          if [[ -n "${{ inputs.values_file }}" ]]; then
+            HELM_ARGS+=(--values "${{ inputs.values_file }}")
+          fi
+
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            echo "Running Helm dry run."
+            HELM_ARGS+=(--dry-run --debug)
+          else
+            # Helm 4 replacement for the deprecated --atomic flag.
+            HELM_ARGS+=(--rollback-on-failure)
+          fi
+
+          echo "Release name: ${{ inputs.release_name }}"
+          echo "Chart path: ${CHART_PATH}"
+          echo "Namespace: ${{ inputs.namespace }}"
+
+          helm "${HELM_ARGS[@]}"
+
+      # -----------------------------------------------------------------------
+      # Roll back the latest failed/superseded release to its previous revision.
+      # -----------------------------------------------------------------------
+      - name: Rollback release
+        if: inputs.action == 'rollback'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm rollback \
+            "${{ inputs.release_name }}" \
+            --namespace "${{ inputs.namespace }}" \
+            --wait \
+            --timeout 10m
+
+      # -----------------------------------------------------------------------
+      # Uninstall the release.
+      # -----------------------------------------------------------------------
+      - name: Uninstall release
+        if: inputs.action == 'uninstall'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm uninstall \
+            "${{ inputs.release_name }}" \
+            --namespace "${{ inputs.namespace }}" \
+            --wait \
+            --timeout 10m
+
+      # -----------------------------------------------------------------------
+      # Verify the deployment.
+      # -----------------------------------------------------------------------
+      - name: Verify deployment
+        if: inputs.action == 'deploy' && inputs.dry_run == false
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NAMESPACE="${{ inputs.namespace }}"
+          RELEASE_NAME="${{ inputs.release_name }}"
+
+          echo "=== Helm status ==="
+          helm status "${RELEASE_NAME}" --namespace "${NAMESPACE}"
+
+          echo "=== Helm history ==="
+          helm history "${RELEASE_NAME}" --namespace "${NAMESPACE}"
+
+          echo "=== Pods ==="
+          kubectl get pods --namespace "${NAMESPACE}" -o wide
+
+          echo "=== Services ==="
+          kubectl get services --namespace "${NAMESPACE}"
+
+      # -----------------------------------------------------------------------
+      # GitHub Actions job summary.
+      # -----------------------------------------------------------------------
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Helm ${{ inputs.action }}: ${{ inputs.release_name }}"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Action | \`${{ inputs.action }}\` |"
+            echo "| Version | \`${{ inputs.version }}\` |"
+            echo "| Image name | \`${{ inputs.image_name }}\` |"
+            echo "| Namespace | \`${{ inputs.namespace }}\` |"
+            echo "| Chart | \`${CHART_PATH:-${{ inputs.chart_path }}}\` |"
+            echo "| ECR repository | \`${ECR_REPOSITORY}\` |"
+            echo "| Cluster | \`${EKS_CLUSTER_NAME}\` |"
+
+            if [[ "${{ inputs.include_backend }}" == "true" ]]; then
+              echo "| Backend tag | \`${BACKEND_TAG:-not-resolved}\` |"
+            fi
+
+            if [[ "${{ inputs.include_frontend }}" == "true" ]]; then
+              echo "| Frontend tag | \`${FRONTEND_TAG:-not-resolved}\` |"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
