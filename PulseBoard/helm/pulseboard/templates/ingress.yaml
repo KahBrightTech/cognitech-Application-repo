@@ -8,6 +8,8 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/load-balancer-name: {{ .Values.ingress.alb_name | quote }}
     alb.ingress.kubernetes.io/scheme: {{ .Values.ingress.scheme | quote }}
+    # Shared with the api Ingress so both provision onto the same ALB.
+    alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.group_name | quote }}
     # Loops through all health check values
     {{- range $key, $value := .Values.ingress.healthcheck }}
     alb.ingress.kubernetes.io/{{ $key }}: {{ $value | quote }}
@@ -25,8 +27,23 @@ spec:
     - host: {{ .Values.ingress.hostname | quote }}
       http:
         paths:
-          # Must come first - catches plain HTTP requests and redirects them
-          # to HTTPS before the real app rule below would otherwise match.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ssl-redirect
+                port:
+                  name: use-annotation
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.frontend.name }}
+                port:
+                  number: {{ .Values.frontend.service.port }}
+    - host: {{ .Values.ingress.accounthostname | quote }}
+      http:
+        paths:
           - path: /
             pathType: Prefix
             backend:

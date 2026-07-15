@@ -51,6 +51,9 @@ ingress:
   alb_name: pulseboard-alb
   scheme: internet-facing
   controller: ingress.k8s.aws/alb
+  # Both this Ingress and the api one share this group.name, so they're
+  # provisioned onto the SAME ALB instead of one each.
+  group_name: pulseboard-shared-alb
   healthcheck:
     healthcheck-protocol: "HTTP"
     healthcheck-port: "traffic-port"
@@ -63,6 +66,13 @@ ingress:
   alb_certificate_arn: "arn:aws:acm:us-east-1:271457809232:certificate/31b4636f-d7d5-4109-80f2-6892489df997"
   listenning_ports: '[{"HTTPS":443}, {"HTTP":80}]'
   hostname: "pb.prod.novutechnologies.net"
+  accounthostname: "pulseboardinternal.prod.novutechnologies.net"
+  # Dedicated Ingress + listener for direct backend/API access on port 4000.
+  # Separate listen-ports on a shared-group Ingress creates its own listener
+  # on the same ALB, keeping its rules independent from the 80/443 ones above.
+  api:
+    ingressname: pulseboard-api-ingress
+    listenning_ports: '[{"HTTP":4000}]'
 
 backend:
   name: pulseboard-backend
