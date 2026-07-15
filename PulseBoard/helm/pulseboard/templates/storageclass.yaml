@@ -1,0 +1,13 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.global.storage.ClassName }}
+provisioner: ebs.csi.aws.com 
+parameters:
+  type: {{ .Values.global.storage.type }}
+  iops: {{ .Values.global.storage.iops }}
+  throughput: {{ .Values.global.storage.throughput }}
+  encrypted: {{ .Values.global.storage.encrypted }}
+volumeBindingMode: WaitForFirstConsumer 
+allowVolumeExpansion: {{ .Values.global.storage.allowVolumeExpansion }} 
+reclaimPolicy: {{ .Values.global.storage.reclaimPolicy }} 
