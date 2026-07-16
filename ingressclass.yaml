@@ -1,0 +1,9 @@
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: pulseboard-ingress
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "true"
+    helm.sh/resource-policy: keep
+spec:
+  controller: ingress.k8s.aws/alb

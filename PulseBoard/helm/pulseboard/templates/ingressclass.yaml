@@ -4,5 +4,12 @@ metadata:
   name: {{ .Values.ingress.ingressclassname }}
   annotations:
     ingressclass.kubernetes.io/is-default-class: "true"
+    # Tells Helm to never delete this on uninstall/upgrade. Without this, a
+    # helm uninstall can delete the IngressClass while the ALB Ingress
+    # Controller is still mid-reconcile tearing down the Ingress's AWS
+    # resources - the controller's own admission-webhook self-check then
+    # fails ("IngressClass not found"), it can never finish, the Ingress
+    # finalizer never clears, and the Ingress is stuck Terminating forever.
+    helm.sh/resource-policy: keep
 spec:
   controller: {{ .Values.ingress.controller }}
