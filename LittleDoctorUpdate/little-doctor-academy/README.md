@@ -101,3 +101,16 @@ This repository is a polished production starter. Before collecting child profil
 ## Important
 
 The app is educational and must not diagnose, prescribe, or replace a qualified medical professional.
+
+## 2026-07-15-v3 update
+
+- Added 24 interactive patient scenarios covering nurse, doctor, imaging, pharmacist, parent, and OTC-counter journeys.
+- Added a custom parent sign-in/sign-up screen matching the Little Doctor Academy design.
+- Added the Medical Match Dash quick-break game with star rewards.
+- Added Dr. Priya, Pharmacist Oliver, X-ray Technician Luca, Maya, and Leo.
+- Replaced low-resolution character rendering with scalable SVG artwork.
+- Added working navigation/actions for login, logout, game, scenario cards, character cards, dashboard, and home controls.
+
+### Authentication note
+
+The included login screen is a functional local demonstration that stores only the demo user name and email in browser localStorage. It does not store the entered password. Before production deployment, connect the form handlers in `src/components/LoginScreen.jsx` to an Amazon Cognito User Pool using Amplify Auth or the Cognito SDK, and validate Cognito JWTs in the EKS backend API.

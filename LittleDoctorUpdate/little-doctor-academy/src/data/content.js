@@ -1,193 +1,50 @@
 export const doctors = [
-  { id: "mia", name: "Dr. Mia", role: "Pediatrician", image: "/assets/characters-hd/dr-mia.webp", color: "lavender", message: "I help children feel healthy and strong." },
-  { id: "alex", name: "Dr. Alex", role: "Surgeon", image: "/assets/characters-hd/dr-alex.webp", color: "mint", message: "I carefully fix problems inside the body." },
-  { id: "bella", name: "Nurse Bella", role: "Nurse", image: "/assets/characters-hd/nurse-bella.webp", color: "peach", message: "I check vital signs and help patients feel safe." },
-  { id: "sam", name: "Dr. Sam", role: "Dentist", image: "/assets/characters-hd/dr-sam.webp", color: "sky", message: "I help keep teeth clean and healthy." },
-  { id: "zoe", name: "Dr. Zoe", role: "Veterinarian", image: "/assets/characters-hd/dr-zoe.webp", color: "rose", message: "I care for animals when they are sick." }
+  { id:"mia", name:"Dr. Mia", role:"Pediatrician", image:"/assets/characters/dr-mia.svg", color:"lavender", message:"I help children feel healthy and strong." },
+  { id:"alex", name:"Dr. Alex", role:"Urgent Care Doctor", image:"/assets/characters/dr-alex.svg", color:"mint", message:"I examine injuries and decide what care comes next." },
+  { id:"bella", name:"Nurse Bella", role:"Registered Nurse", image:"/assets/characters/nurse-bella.svg", color:"peach", message:"I welcome patients, check vital signs, and help everyone feel safe." },
+  { id:"sam", name:"Dr. Sam", role:"Dentist", image:"/assets/characters/dr-sam.svg", color:"sky", message:"I help keep teeth clean and healthy." },
+  { id:"zoe", name:"Dr. Zoe", role:"Veterinarian", image:"/assets/characters/dr-zoe.svg", color:"rose", message:"I care for animals when they are sick." },
+  { id:"oliver", name:"Oliver", role:"Pharmacist", image:"/assets/characters/pharmacist-oliver.svg", color:"lavender", message:"I explain how medicines are used safely with a grown-up." },
+  { id:"priya", name:"Dr. Priya", role:"Allergy Specialist", image:"/assets/characters/dr-priya.svg", color:"peach", message:"I help patients understand allergies and breathing problems." },
+  { id:"luca", name:"Luca", role:"X-ray Technician", image:"/assets/characters/tech-luca.svg", color:"sky", message:"I take clear pictures that help doctors look at bones." }
 ];
 
 export const patients = [
-  { id: "lily", name: "Lily", age: 6, image: "/assets/characters-hd/lily.webp", symptom: "Cough and sore throat", level: "Beginner" },
-  { id: "ethan", name: "Ethan", age: 8, image: "/assets/characters-hd/ethan.webp", symptom: "Scraped knee", level: "Beginner" },
-  { id: "noah", name: "Noah", age: 5, image: "/assets/characters-hd/noah.webp", symptom: "Tummy ache", level: "Intermediate" },
-  { id: "emma", name: "Emma", age: 7, image: "/assets/characters-hd/emma.webp", symptom: "Twisted ankle", level: "Intermediate" }
+  { id:"lily", name:"Lily", age:6, image:"/assets/characters/lily.svg", symptom:"Cough and sore throat", level:"Beginner" },
+  { id:"ethan", name:"Ethan", age:8, image:"/assets/characters/ethan.svg", symptom:"Scraped knee", level:"Beginner" },
+  { id:"noah", name:"Noah", age:5, image:"/assets/characters/noah.svg", symptom:"Tummy ache", level:"Intermediate" },
+  { id:"emma", name:"Emma", age:7, image:"/assets/characters/emma.svg", symptom:"Twisted ankle", level:"Intermediate" },
+  { id:"maya", name:"Maya", age:9, image:"/assets/characters/maya.svg", symptom:"Itchy eyes", level:"Beginner" },
+  { id:"leo", name:"Leo", age:7, image:"/assets/characters/leo.svg", symptom:"Ear discomfort", level:"Intermediate" }
 ];
 
+const makeLesson=(id,title,icon,minutes,description,patient,system,steps,question,options,answer)=>({id,title,icon,minutes,description,patient,system,steps,quiz:{question,options,answer}});
 export const lessons = [
-  {
-    id: "heartbeat",
-    title: "Listen to the Heart",
-    icon: "🩺",
-    minutes: 4,
-    description: "Learn where the heart is and listen to a friendly heartbeat.",
-    steps: [
-      "Welcome the patient and ask how they feel.",
-      "Place the stethoscope over the heart.",
-      "Listen carefully to the heartbeat.",
-      "Tell the patient the heart sounds strong."
-    ],
-    quiz: { question: "What tool helps a doctor listen to the heart?", options: ["Thermometer", "Stethoscope", "Bandage"], answer: "Stethoscope" }
-  },
-  {
-    id: "temperature",
-    title: "Check a Temperature",
-    icon: "🌡️",
-    minutes: 3,
-    description: "Use a thermometer and learn what a fever means.",
-    steps: [
-      "Explain that the thermometer will not hurt.",
-      "Place the thermometer correctly.",
-      "Wait for the reading.",
-      "Decide whether the temperature is normal."
-    ],
-    quiz: { question: "Which tool measures body temperature?", options: ["Thermometer", "X-ray", "Stethoscope"], answer: "Thermometer" }
-  },
-  {
-    id: "bandage",
-    title: "Treat a Scraped Knee",
-    icon: "🩹",
-    minutes: 5,
-    description: "Clean a small scrape and apply a bandage.",
-    steps: [
-      "Wash your hands.",
-      "Gently clean the scrape.",
-      "Dry the area.",
-      "Choose and apply the correct bandage."
-    ],
-    quiz: { question: "What should you do before treating a scrape?", options: ["Wash your hands", "Run outside", "Eat a snack"], answer: "Wash your hands" }
-  },
-  {
-    id: "xray",
-    title: "Explore an X-ray",
-    icon: "🩻",
-    minutes: 6,
-    description: "Discover what bones look like in an X-ray image.",
-    steps: [
-      "Ask where the patient feels pain.",
-      "Explain what an X-ray does.",
-      "Look carefully at the bones.",
-      "Choose whether the bone looks healthy."
-    ],
-    quiz: { question: "An X-ray helps doctors see what?", options: ["Bones", "Thoughts", "Dreams"], answer: "Bones" }
-  }
+makeLesson("sore-throat","The Sore Throat Visit","🗣️",5,"Follow Lily from nurse check-in to safe comfort care.","Lily","Nurse → Doctor → Pharmacist",["Nurse Bella asks Lily when her throat began hurting.","Check temperature and ask about drinking fluids.","Dr. Mia looks at Lily’s throat and listens to her breathing.","The care team recommends rest, fluids, and tells a grown-up when to seek more help.","Pharmacist Oliver explains that a grown-up must read every medicine label."],"Who should read and give a child medicine?",["A trusted grown-up","The child alone","A classmate"],"A trusted grown-up"),
+makeLesson("scraped-knee","Clean a Scraped Knee","🩹",5,"Clean, protect, and check a small playground scrape.","Ethan","Nurse → Doctor → OTC aisle",["Wash hands before touching the scrape.","Nurse Bella gently rinses away dirt.","Dr. Alex checks that the cut is small and movement is normal.","Apply a clean bandage.","Choose basic first-aid supplies with a grown-up."],"What comes first before caring for a scrape?",["Wash hands","Add candy","Cover it with dirt"],"Wash hands"),
+makeLesson("tummy-ache","The Tummy Ache Mystery","🤕",6,"Ask careful questions and learn warning signs.","Noah","Nurse → Doctor",["Ask where the tummy hurts and when it started.","Check temperature and hydration.","Dr. Mia gently examines the tummy.","Discuss food, bathroom habits, and rest.","Tell a grown-up right away if pain becomes severe or keeps getting worse."],"What is a helpful first step?",["Ask where it hurts","Ignore the patient","Give random medicine"],"Ask where it hurts"),
+makeLesson("ankle","The Twisted Ankle","🦶",6,"Check an ankle and learn rest, ice, compression, and elevation.","Emma","Nurse → Doctor → X-ray tech",["Nurse Bella asks how the ankle was hurt.","Check swelling and whether Emma can safely move her toes.","Dr. Alex examines the ankle.","Luca explains how an X-ray may be used when needed.","The team reviews rest and a wrapped cold pack with a grown-up."],"What can an X-ray help show?",["Bones","Dreams","Sounds"],"Bones"),
+makeLesson("fever","A Fever Check","🌡️",5,"Measure temperature and focus on comfort and hydration.","Leo","Nurse → Doctor → Pharmacist",["Nurse Bella explains the thermometer.","Take the temperature correctly.","Ask about drinking, energy, and other symptoms.","Dr. Mia explains when a grown-up should call a clinician.","Oliver reminds the family to use only the correct child dose on the label or clinician instructions."],"What tool measures temperature?",["Thermometer","Bandage","Flashlight"],"Thermometer"),
+makeLesson("earache","The Achy Ear","👂",5,"See how an ear is checked without putting objects inside it.","Leo","Nurse → Doctor → Pharmacy",["Ask when the ear began hurting.","Check temperature.","Dr. Mia uses an otoscope to look safely inside.","Never place cotton swabs or toys inside the ear.","A grown-up follows the doctor’s care plan."],"What tool helps a doctor look in an ear?",["Otoscope","Stethoscope","Spoon"],"Otoscope"),
+makeLesson("itchy-eyes","Itchy, Watery Eyes","👁️",5,"Explore allergy questions and eye safety.","Maya","Nurse → Allergy doctor → OTC aisle",["Ask about pollen, pets, and when symptoms happen.","Nurse Bella checks for swelling and breathing trouble.","Dr. Priya explains common allergy clues.","Avoid rubbing the eyes and wash hands.","A grown-up asks a pharmacist before choosing an age-appropriate OTC product."],"What should a child do before using allergy medicine?",["Ask a grown-up","Guess the dose","Share medicine"],"Ask a grown-up"),
+makeLesson("cough","The Busy Cough","😮‍💨",6,"Listen to breathing and learn when coughing needs urgent help.","Lily","Nurse → Doctor",["Ask how long the cough has lasted.","Check breathing rate and oxygen if available.","Dr. Mia listens with a stethoscope.","Offer fluids and rest when appropriate.","Get urgent adult help for struggling to breathe, blue lips, or severe symptoms."],"Which tool listens to breathing?",["Stethoscope","Thermometer","Bandage"],"Stethoscope"),
+makeLesson("headache","The After-School Headache","🤯",5,"Review sleep, water, screens, and warning signs.","Maya","Nurse → Doctor",["Ask where the head hurts.","Check recent sleep, meals, water, and screen time.","Nurse Bella checks temperature and basic vital signs.","Dr. Mia performs a simple neurologic check.","Tell a grown-up immediately after a serious head injury or with severe new symptoms."],"Which habit may help prevent some headaches?",["Drink water","Skip every meal","Stay up all night"],"Drink water"),
+makeLesson("toothache","The Toothache Appointment","🦷",5,"Visit the dentist and practice healthy tooth habits.","Ethan","Nurse → Dentist → Pharmacy",["Ask which tooth hurts and for how long.","Dr. Sam checks the tooth and gums.","Review brushing and flossing.","Explain that dental treatment depends on the cause.","A grown-up follows any medicine directions from the dentist or pharmacist."],"Who checks a painful tooth?",["Dentist","X-ray technician only","Coach"],"Dentist"),
+makeLesson("splinter","The Tiny Splinter","🖐️",4,"Practice safe first aid and know when to stop.","Noah","Nurse → Doctor",["Wash hands and inspect the area.","Nurse Bella cleans the skin.","A grown-up may remove a shallow, easy-to-grasp splinter with clean tools.","Stop if it is deep, near the eye, or difficult to remove.","Cover the area and watch for redness or swelling."],"When should a child get adult help?",["Before removing a splinter","Never","Only next year"],"Before removing a splinter"),
+makeLesson("sunburn","A Sunny-Day Sunburn","☀️",5,"Cool the skin and learn sun protection.","Emma","Nurse → Doctor → OTC aisle",["Move out of direct sun.","Cool the skin gently; do not place ice directly on it.","Offer water.","Dr. Mia checks for blistering or severe symptoms.","Choose sunscreen and soothing products with a grown-up."],"What helps prevent sunburn?",["Sunscreen and shade","More midday sun","Hot water"],"Sunscreen and shade"),
+makeLesson("bug-bite","The Itchy Bug Bite","🦟",4,"Reduce scratching and recognize allergy emergencies.","Leo","Nurse → Doctor → OTC aisle",["Wash the bite with soap and water.","Use a wrapped cold pack for comfort.","Avoid scratching.","Dr. Priya explains emergency signs such as trouble breathing or face swelling.","A grown-up asks the pharmacist about age-appropriate itch relief."],"Which symptom needs emergency help?",["Trouble breathing","One small itch","A shoelace untied"],"Trouble breathing"),
+makeLesson("nosebleed","Stop a Nosebleed","👃",4,"Learn the correct sitting and pinching technique.","Ethan","Nurse → Doctor",["Sit upright and lean slightly forward.","Pinch the soft part of the nose.","Breathe through the mouth and keep holding.","Do not tilt the head backward.","Get adult medical help if bleeding is heavy or will not stop."],"Which direction should the patient lean?",["Slightly forward","Far backward","Upside down"],"Slightly forward"),
+makeLesson("dehydration","The Very Thirsty Patient","💧",5,"Spot dehydration clues and practice safe rehydration.","Lily","Nurse → Doctor → Pharmacy",["Ask about drinking, vomiting, diarrhea, and activity.","Nurse Bella checks mouth moisture and energy.","Dr. Mia explains dehydration signs.","Take small frequent sips when the care team recommends it.","A pharmacist can help a grown-up find an oral rehydration product."],"What is a common dehydration clue?",["Very little urine","Extra shiny shoes","Longer hair"],"Very little urine"),
+makeLesson("rash","The Mystery Rash","🔎",6,"Describe a rash and avoid unsafe sharing of creams.","Maya","Nurse → Doctor → Pharmacist",["Ask when the rash appeared and what touched the skin.","Check for fever, pain, breathing trouble, and face swelling.","Dr. Priya looks at the rash pattern.","Do not share creams or medicines.","A grown-up follows the recommended skin-care plan."],"What information helps the doctor?",["When the rash started","Favorite cartoon only","Shoe size only"],"When the rash started"),
+makeLesson("constipation","The Bathroom Question","🚽",5,"Talk kindly about water, fiber, movement, and symptoms.","Noah","Nurse → Doctor → OTC aisle",["Use respectful words and ask when the last bowel movement happened.","Ask about water, fruits, vegetables, and activity.","Dr. Mia checks for severe pain or vomiting.","Practice healthy bathroom routines.","Never use a laxative for a child without a grown-up and clinician or pharmacist guidance."],"Who should guide child laxative use?",["A grown-up and health professional","Another child","No one"],"A grown-up and health professional"),
+makeLesson("motion-sickness","The Bumpy Car Ride","🚗",4,"Learn simple comfort steps for motion sickness.","Emma","Nurse → Pharmacist",["Ask when nausea happens during travel.","Look toward the horizon and get fresh air when safe.","Avoid reading in a moving car.","Take small sips of water.","A grown-up asks the pharmacist before using motion-sickness medicine."],"What may help during a car ride?",["Look toward the horizon","Read tiny print","Spin around"],"Look toward the horizon"),
+makeLesson("cold","The Stuffy-Nose Cold","🤧",5,"Practice handwashing, tissues, fluids, and rest.","Leo","Nurse → Doctor → OTC aisle",["Ask about cough, fever, and how long symptoms have lasted.","Wash hands and use tissues.","Dr. Mia checks breathing and hydration.","Rest and drink fluids.","A grown-up reads labels carefully because many cold products should not be used in young children."],"What helps stop germs spreading?",["Handwashing","Sharing tissues","Coughing on friends"],"Handwashing"),
+makeLesson("mild-burn","The Warm-Pan Accident","🔥",5,"Cool a small burn and learn emergency boundaries.","Ethan","Nurse → Doctor",["Move away from the heat source.","Tell a grown-up immediately.","Cool a minor burn under cool running water; do not use ice or butter.","Dr. Alex checks size, depth, and location.","Emergency care is needed for severe, large, electrical, chemical, face, hand, or airway burns."],"What should go on a minor fresh burn first?",["Cool running water","Butter","Ice directly"],"Cool running water"),
+makeLesson("asthma","The Wheezy Playground Visit","🫁",6,"Recognize breathing trouble and follow an asthma action plan.","Maya","Nurse → Doctor → Pharmacist",["Stop activity and sit comfortably.","Nurse Bella checks breathing and gets a grown-up.","Dr. Priya follows the patient’s asthma action plan.","Use only the patient’s prescribed inhaler with adult guidance.","Call emergency services for severe breathing trouble or if rescue steps do not help."],"Can children share inhalers?",["No","Yes, always","Only at recess"],"No"),
+makeLesson("medicine-label","The Medicine Label Detective","🔤",5,"Find the active ingredient, age directions, dose, and warnings.","Noah","Pharmacist → Parent",["Pharmacist Oliver finds the active ingredient.","Check the age and weight directions.","Use the measuring tool supplied with liquid medicine.","Check warnings and avoid duplicate active ingredients.","A trusted grown-up stores medicine safely out of reach."],"What should measure liquid medicine?",["The supplied dosing tool","A kitchen spoon","A toy cup"],"The supplied dosing tool"),
+makeLesson("checkup","The Healthy Checkup","🩺",6,"Complete a full well-child visit.","Lily","Reception → Nurse → Doctor",["Check in with a parent or guardian.","Nurse Bella measures height, weight, temperature, and pulse.","Dr. Mia asks about sleep, food, school, and activity.","Complete a friendly physical exam.","Celebrate healthy habits and schedule the next visit."],"Why are regular checkups useful?",["They track health and growth","They replace every emergency visit","They are only for adults"],"They track health and growth"),
+makeLesson("pharmacy-pickup","The Pharmacy Pickup","💊",5,"Practice safe prescription pickup and questions.","Emma","Doctor → Pharmacist → Parent",["The doctor sends a prescription when appropriate.","Oliver confirms the patient and medicine.","A grown-up asks what it is for and how to use it.","Review storage, timing, and possible warnings.","Never share prescription medicine."],"Can prescription medicine be shared?",["No","Yes with friends","Yes if colors match"],"No"),
+makeLesson("pink-eye","The Red Eye Visit","👀",5,"Practice hand hygiene and learn why eye symptoms need careful assessment.","Lily","Nurse → Doctor → Pharmacist",["Ask when the redness began and whether there is pain or vision trouble.","Wash hands before and after helping the patient.","Dr. Mia checks both eyes and asks about discharge and allergies.","Avoid sharing towels and never use another person’s eye drops.","A grown-up follows the clinician and pharmacist instructions."],"Can patients share eye drops?",["No","Yes with family","Only at school"],"No")
 ];
 
-export const badges = [
-  { id: "kind", label: "Kind Doctor", icon: "💗" },
-  { id: "listener", label: "Great Listener", icon: "👂" },
-  { id: "heart", label: "Heart Helper", icon: "❤️" },
-  { id: "bandage", label: "Bandage Pro", icon: "🩹" }
-];
-
-export const scenarios = [
-  {
-    id: "sore-throat-visit",
-    title: "Lily's Sore Throat Visit",
-    icon: "🏥",
-    minutes: 9,
-    description: "Follow Lily from nurse check-in to the doctor and then the pharmacy while learning how a simple diagnosis is made.",
-    patient: { name: "Lily", image: "/assets/characters-hd/lily.webp", symptom: "Cough and sore throat" },
-    scenes: [
-      {
-        role: "nurse", location: "Nurse station", characterName: "Nurse Bella", characterImage: "/assets/characters-hd/nurse-bella.webp",
-        title: "Welcome Lily and check her symptoms",
-        prompt: "Lily says her throat hurts and she has been coughing. What should Nurse Bella do first?",
-        options: [
-          { label: "Ask when the symptoms started", feedback: "Great choice. A nurse first listens carefully and gathers important information." },
-          { label: "Give medicine immediately", feedback: "Medicine should only be given after the care team understands the problem." },
-          { label: "Send her home without checking", feedback: "Patients should be assessed so the team can decide what care is appropriate." }
-        ]
-      },
-      {
-        role: "nurse", location: "Vitals area", characterName: "Nurse Bella", characterImage: "/assets/characters-hd/nurse-bella.webp",
-        title: "Check Lily's vital signs",
-        prompt: "Which check helps the team learn whether Lily may have a fever?",
-        options: [
-          { label: "Use a thermometer", feedback: "Correct. A thermometer measures body temperature." },
-          { label: "Use a bandage", feedback: "A bandage protects cuts, but it cannot measure a fever." },
-          { label: "Use an X-ray", feedback: "An X-ray can show bones and some internal structures, but it is not used to check temperature." }
-        ]
-      },
-      {
-        role: "doctor", location: "Exam room", characterName: "Dr. Mia", characterImage: "/assets/characters-hd/dr-mia.webp",
-        title: "Help Dr. Mia examine Lily",
-        prompt: "Dr. Mia listens to Lily's lungs and looks at her throat. Which finding best supports a common viral cold?",
-        options: [
-          { label: "Cough, runny nose, and mild sore throat", feedback: "That pattern often fits a common viral cold. The doctor uses the whole story and exam before deciding." },
-          { label: "A scraped knee", feedback: "A scraped knee is unrelated to Lily's throat and cough." },
-          { label: "A twisted ankle", feedback: "An ankle injury would need a different examination." }
-        ]
-      },
-      {
-        role: "doctor", location: "Diagnosis discussion", characterName: "Dr. Mia", characterImage: "/assets/characters-hd/dr-mia.webp",
-        title: "Explain the diagnosis kindly",
-        prompt: "Dr. Mia believes Lily has a viral cold. What is the most helpful explanation?",
-        options: [
-          { label: "Rest, drink fluids, and follow the care instructions", feedback: "Exactly. Clear, calm instructions help patients and families know what to do next." },
-          { label: "Every cold needs antibiotics", feedback: "Antibiotics treat certain bacterial infections, not ordinary viral colds." },
-          { label: "Ignore worsening symptoms", feedback: "Families should know when to seek more help if symptoms get worse or do not improve." }
-        ]
-      },
-      {
-        role: "pharmacist", location: "Hospital pharmacy", characterName: "Pharmacist Maya", characterImage: "/assets/characters-hd/dr-alex.webp",
-        title: "Learn how the pharmacist helps",
-        prompt: "The pharmacist reviews Lily's care instructions. What should the pharmacist explain?",
-        options: [
-          { label: "How and when a medicine should be used", feedback: "Correct. Pharmacists help families understand safe use, timing, and important warnings." },
-          { label: "Take any amount that tastes good", feedback: "Medicine should only be taken in the exact amount directed by a responsible adult and healthcare professional." },
-          { label: "Share medicine with friends", feedback: "Medicine should never be shared. It is chosen for a specific patient and situation." }
-        ]
-      }
-    ]
-  },
-  {
-    id: "tummy-ache-visit",
-    title: "Noah's Tummy Ache Visit",
-    icon: "🩺",
-    minutes: 8,
-    description: "Ask questions, check symptoms, choose a gentle diagnosis path, and learn what the pharmacist reviews with a family.",
-    patient: { name: "Noah", image: "/assets/characters-hd/noah.webp", symptom: "Tummy ache" },
-    scenes: [
-      {
-        role: "nurse", location: "Nurse station", characterName: "Nurse Bella", characterImage: "/assets/characters-hd/nurse-bella.webp",
-        title: "Ask Noah about his pain",
-        prompt: "Which question gives the nurse useful information?",
-        options: [
-          { label: "Where does it hurt and when did it start?", feedback: "Good assessment. Location and timing help the medical team understand the problem." },
-          { label: "What is your favorite cartoon?", feedback: "That may help Noah relax, but the nurse also needs symptom details." },
-          { label: "Can you run very fast?", feedback: "That does not directly explain Noah's tummy ache." }
-        ]
-      },
-      {
-        role: "doctor", location: "Exam room", characterName: "Dr. Mia", characterImage: "/assets/characters-hd/dr-mia.webp",
-        title: "Choose a careful exam",
-        prompt: "What should Dr. Mia do during a gentle tummy examination?",
-        options: [
-          { label: "Ask permission and gently examine the abdomen", feedback: "Correct. Doctors explain what they are doing and check gently." },
-          { label: "Press very hard without warning", feedback: "Exams should be explained and performed gently." },
-          { label: "Skip the examination", feedback: "The doctor needs enough information to make a safe decision." }
-        ]
-      },
-      {
-        role: "doctor", location: "Care plan", characterName: "Dr. Mia", characterImage: "/assets/characters-hd/dr-mia.webp",
-        title: "Create the care plan",
-        prompt: "Noah's exam is reassuring and he may be mildly constipated. Which plan is most helpful?",
-        options: [
-          { label: "Fluids, healthy fiber, movement, and family follow-up", feedback: "That is a sensible supportive plan when the doctor has ruled out urgent warning signs." },
-          { label: "Never drink water", feedback: "Fluids are often an important part of healthy digestion." },
-          { label: "Hide worsening pain", feedback: "Worsening or severe symptoms should be shared with a responsible adult and healthcare professional." }
-        ]
-      },
-      {
-        role: "pharmacist", location: "Hospital pharmacy", characterName: "Pharmacist Maya", characterImage: "/assets/characters-hd/dr-alex.webp",
-        title: "Review safe medicine use",
-        prompt: "If the doctor recommends a medicine, what should the pharmacist confirm?",
-        options: [
-          { label: "The correct child, amount, timing, and instructions", feedback: "Exactly. Pharmacists double-check details and answer questions about safe use." },
-          { label: "That everyone in the family takes it", feedback: "Medicine is not automatically appropriate for other family members." },
-          { label: "That the label can be ignored", feedback: "The label and professional instructions are essential for safe use." }
-        ]
-      }
-    ]
-  }
-];
+export const badges=[{id:"kind",label:"Kind Doctor",icon:"💗"},{id:"listener",label:"Great Listener",icon:"👂"},{id:"pharmacy",label:"Label Detective",icon:"🔤"},{id:"helper",label:"Care Team Hero",icon:"🏥"}];

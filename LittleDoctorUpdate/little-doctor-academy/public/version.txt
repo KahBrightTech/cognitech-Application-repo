@@ -1,3 +1,3 @@
-Little Doctor Academy - Updated Hospital Stories Edition
-Build: 2026-07-14-v2
-Includes: Nurse -> Doctor -> Diagnosis -> Pharmacist scenarios
+Little Doctor Academy - Expanded Patient Journeys Edition
+Build: 2026-07-15-v3
+Includes: 24 interactive patient scenarios, custom login UI, Medical Match Dash game, expanded care team, scalable SVG characters
