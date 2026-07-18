@@ -30,6 +30,13 @@ cognito:
 
 podSecurityContext:
   runAsNonRoot: true
+  # Makes the kubelet chgrp/chmod every emptyDir in the pod (nginx-cache,
+  # nginx-run, tmp, html-config, nginx-conf) to this group and adds it as a
+  # supplementary GID to the container process - needed because with
+  # readOnlyRootFilesystem, nginx (running as a non-root, non-0 uid) has to
+  # be able to write into those emptyDirs, and plain emptyDir defaults are
+  # not guaranteed to be writable by an arbitrary non-root uid otherwise.
+  fsGroup: 101
   seccompProfile:
     type: RuntimeDefault
 

@@ -6,11 +6,34 @@ services:
       - "8080:8080"
     restart: unless-stopped
     read_only: true
-    tmpfs:
-      - /var/cache/nginx
-      - /var/run
-      - /tmp
-      - /usr/share/nginx/html/config
+    # Compose's short `tmpfs:` form mounts root:root with mode 0755 by
+    # default, which the container's non-root `nginx` user can't write to -
+    # that's what broke startup. The long form below forces each mount to
+    # be world-writable (mode 1777, same as a normal /tmp) regardless of
+    # which uid the image runs as.
+    volumes:
+      - type: tmpfs
+        target: /var/cache/nginx
+        tmpfs:
+          mode: 1023 # decimal for octal 1777 (rwxrwxrwt) - Docker takes this field as a plain decimal int, not octal notation
+      - type: tmpfs
+        target: /var/run
+        tmpfs:
+          mode: 1023 # decimal for octal 1777 (rwxrwxrwt) - Docker takes this field as a plain decimal int, not octal notation
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          mode: 1023 # decimal for octal 1777 (rwxrwxrwt) - Docker takes this field as a plain decimal int, not octal notation
+      - type: tmpfs
+        target: /usr/share/nginx/html/config
+        tmpfs:
+          mode: 1023 # decimal for octal 1777 (rwxrwxrwt) - Docker takes this field as a plain decimal int, not octal notation
+      # nginx renders nginx.conf.template -> /etc/nginx/conf.d/default.conf
+      # at startup (envsubst); needs to be writable even with read_only: true.
+      - type: tmpfs
+        target: /etc/nginx/conf.d
+        tmpfs:
+          mode: 1023 # decimal for octal 1777 (rwxrwxrwt) - Docker takes this field as a plain decimal int, not octal notation
     environment:
       VITE_COGNITO_USER_POOL_ID: ${VITE_COGNITO_USER_POOL_ID}
       VITE_COGNITO_CLIENT_ID: ${VITE_COGNITO_CLIENT_ID}
