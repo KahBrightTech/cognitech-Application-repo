@@ -17,6 +17,9 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
       annotations:
         checksum/config: "v1"
+        {{- if not .Values.cognito.existingSecret }}
+        checksum/cognito-secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -33,6 +36,22 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          env:
+            - name: VITE_COGNITO_USER_POOL_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "little-doctor-academy.cognitoSecretName" . }}
+                  key: VITE_COGNITO_USER_POOL_ID
+            - name: VITE_COGNITO_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "little-doctor-academy.cognitoSecretName" . }}
+                  key: VITE_COGNITO_CLIENT_ID
+            - name: VITE_COGNITO_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "little-doctor-academy.cognitoSecretName" . }}
+                  key: VITE_COGNITO_REGION
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 3
@@ -50,10 +69,17 @@ spec:
               mountPath: /var/run
             - name: tmp
               mountPath: /tmp
+            # readOnlyRootFilesystem means the entrypoint script can't write
+            # env-config.js into the image's html dir directly - this gives
+            # it a writable spot at that exact path instead.
+            - name: html-config
+              mountPath: /usr/share/nginx/html/config
       volumes:
         - name: nginx-cache
           emptyDir: {}
         - name: nginx-run
           emptyDir: {}
         - name: tmp
+          emptyDir: {}
+        - name: html-config
           emptyDir: {}

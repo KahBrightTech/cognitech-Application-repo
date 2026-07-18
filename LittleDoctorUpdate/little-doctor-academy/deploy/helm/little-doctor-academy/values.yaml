@@ -11,6 +11,23 @@ serviceAccount:
 
 podAnnotations: {}
 
+# Cognito pool/client the app authenticates against (see
+# deploy/terraform/cognito). Injected into the container as env vars at
+# startup and turned into /config/env-config.js by the container's
+# entrypoint - no rebuild needed to point at a different pool.
+#
+# Preferred for production: create the Secret out-of-band (Terraform,
+# External Secrets, `kubectl create secret`, etc.) with keys
+# VITE_COGNITO_USER_POOL_ID / VITE_COGNITO_CLIENT_ID / VITE_COGNITO_REGION,
+# and set existingSecret to its name. Leave existingSecret empty and this
+# chart will create the Secret from the plain values below instead (fine
+# for dev, but means the values live in your values file / --set history).
+cognito:
+  existingSecret: ""
+  userPoolId: ""
+  clientId: ""
+  region: "us-east-1"
+
 podSecurityContext:
   runAsNonRoot: true
   seccompProfile:

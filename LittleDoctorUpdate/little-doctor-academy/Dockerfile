@@ -18,8 +18,23 @@ FROM nginxinc/nginx-unprivileged:stable-alpine
 # on every build so ECR scan findings don't accumulate between base releases.
 USER root
 RUN apk upgrade --no-cache
+
+# nginx's base image runs every *.template file in /etc/nginx/templates
+# through envsubst into /etc/nginx/conf.d at container startup, and every
+# script in /docker-entrypoint.d/ right after - both happen before nginx
+# starts. That's how Cognito config gets applied per-environment (Helm
+# secret / docker-compose env vars) without rebuilding the image. See
+# nginx.conf.template and docker/50-generate-env-config.sh.
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY docker/50-generate-env-config.sh /docker-entrypoint.d/50-generate-env-config.sh
+RUN chmod +x /docker-entrypoint.d/50-generate-env-config.sh
+
+# Sensible default so the container still starts with a valid CSP even if
+# VITE_COGNITO_REGION isn't set; Helm/compose should still set the real
+# values for auth to actually work.
+ENV VITE_COGNITO_REGION=us-east-1
+
 USER nginx
-COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

@@ -1,0 +1,40 @@
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    # connect-src allows calls to Cognito's regional API endpoint - the
+    # region is filled in at container startup (envsubst, see
+    # /etc/nginx/templates) from the VITE_COGNITO_REGION env var so this
+    # stays correct wherever the pool actually lives, without a rebuild.
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self' https://cognito-idp.${VITE_COGNITO_REGION}.amazonaws.com; frame-ancestors 'none';" always;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Generated at container startup from env vars/secrets - never cache it,
+    # so a config change takes effect on the next pod restart without
+    # waiting out a CDN/browser cache window.
+    location = /config/env-config.js {
+        add_header Cache-Control "no-store" always;
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|svg|woff2)$ {
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+}

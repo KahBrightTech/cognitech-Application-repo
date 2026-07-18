@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars and fill in with your actual account values.
+
+aws_region = "us-east-1"
+
+common = {
+  global        = false
+  account_name  = "myaccount"     # replace with your AWS account/environment name
+  region_prefix = "us-east-1"
+  tags = {
+    Environment = "production"
+    Project     = "little-doctor-academy"
+    Owner       = "devops-team"
+  }
+}
+
+# Only needed if you later add Hosted UI / OAuth redirects.
+callback_urls = []

@@ -10,11 +10,11 @@ import LoginScreen from "./components/LoginScreen";
 import LessonPlayer from "./components/LessonPlayer";
 import CharacterModal from "./components/CharacterModal";
 import { doctors, patients, lessons, badges } from "./data/content";
+import { getCurrentSession, signOut } from "./auth/cognito";
 
 export default function App() {
-  const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("lda-demo-user")); } catch { return null; }
-  });
+  const [user, setUser] = useState(null);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [page, setPage] = useState("home");
   const [activeLesson, setActiveLesson] = useState(null);
   const [selectedCharacter, setSelectedCharacter] = useState(null);
@@ -26,6 +26,14 @@ export default function App() {
     localStorage.setItem("lda-completed", JSON.stringify(completedLessons));
   }, [stars, completedLessons]);
 
+  // Restore a Cognito session (with automatic token refresh) on page load,
+  // so a signed-in parent isn't bounced back to the login screen on reload.
+  useEffect(() => {
+    getCurrentSession()
+      .then(setUser)
+      .finally(function () { setCheckingSession(false); });
+  }, []);
+
   function completeLesson(l) {
     if (!completedLessons.includes(l.id)) {
       setCompletedLessons([...completedLessons, l.id]);
@@ -34,10 +42,11 @@ export default function App() {
   }
   function navigate(d) { setPage(d); window.scrollTo({ top: 0, behavior: "smooth" }); }
 
-  if (!user) return <LoginScreen onLogin={function (u) { localStorage.setItem("lda-demo-user", JSON.stringify(u)); setUser(u); }} />;
+  if (checkingSession) return null;
+  if (!user) return <LoginScreen onLogin={setUser} />;
 
   const childName = user.name || "Ari";
-  function onLogout() { localStorage.removeItem("lda-demo-user"); setUser(null); }
+  function onLogout() { signOut(); setUser(null); }
   function addStars(n) { setStars(function (s) { return s + n; }); }
 
   return (

@@ -10,5 +10,10 @@ services:
       - /var/cache/nginx
       - /var/run
       - /tmp
+      - /usr/share/nginx/html/config
+    environment:
+      VITE_COGNITO_USER_POOL_ID: ${VITE_COGNITO_USER_POOL_ID}
+      VITE_COGNITO_CLIENT_ID: ${VITE_COGNITO_CLIENT_ID}
+      VITE_COGNITO_REGION: ${VITE_COGNITO_REGION:-us-east-1}
     security_opt:
       - no-new-privileges:true
