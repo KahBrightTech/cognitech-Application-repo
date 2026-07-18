@@ -1,7 +1,59 @@
-import { useEffect,useState } from "react";
-import TopBar from "./components/TopBar";import Home from "./pages/Home";import Learn from "./pages/Learn";import Characters from "./pages/Characters";import ParentDashboard from "./pages/ParentDashboard";import Game from "./pages/Game";import LoginScreen from "./components/LoginScreen";import LessonPlayer from "./components/LessonPlayer";import CharacterModal from "./components/CharacterModal";import {doctors,patients,lessons} from "./data/content";
-export default function App(){const [user,setUser]=useState(()=>{try{return JSON.parse(localStorage.getItem("lda-demo-user"))}catch{return null}});const [page,setPage]=useState("home");const [activeLesson,setActiveLesson]=useState(null);const [selectedCharacter,setSelectedCharacter]=useState(null);const [stars,setStars]=useState(()=>Number(localStorage.getItem("lda-stars")||50));const [completedLessons,setCompletedLessons]=useState(()=>JSON.parse(localStorage.getItem("lda-completed")||"[]"));
- useEffect(()=>{localStorage.setItem("lda-stars",String(stars));localStorage.setItem("lda-completed",JSON.stringify(completedLessons))},[stars,completedLessons]);
- const completeLesson=l=>{if(!completedLessons.includes(l.id)){setCompletedLessons([...completedLessons,l.id]);setStars(s=>s+25)}};const navigate=d=>{setPage(d);window.scrollTo({top:0,behavior:"smooth"})};
- if(!user)return <LoginScreen onLogin={u=>{localStorage.setItem("lda-demo-user",JSON.stringify(u));setUser(u)}}/>;
- return <div className="app"><TopBar stars={stars} childName={user.name||"Ari"} onNavigate={navigate} onLogout={()=>{localStorage.removeItem("lda-demo-user");setUser(null)}}/>{page==="home"&&<Home doctors={doctors} lessons={lessons} onNavigate={navigate} onSelectCharacter={setSelectedCharacter} onStartLesson={setActiveLesson}/>} {page==="learn"&&<Learn lessons={lessons} onStartLesson={setActiveLesson}/>} {page==="characters"&&<Characters doctors={doctors} patients={patients} onSelectCharacter={setSelectedCharacter}/>} {page==="game"&&<Game onReward={n=>setStars(s=>s+n)}/>} {page==="parent"&&<ParentDashboard completedLessons={completedLessons} totalLessons={lessons.length} stars={stars}/>}<footer><div><strong>Little Doctor Academy</strong><span>Educational play—not medical advice.</span></div><span>Built for a safe, joyful learning experience.</span></footer>{activeLesson&&<LessonPlayer lesson={activeLesson} onClose={()=>setActiveLesson(null)} onComplete={completeLesson}/>} {selectedCharacter&&<CharacterModal character={selectedCharacter} onClose={()=>setSelectedCharacter(null)}/>}</div>}
+import { useEffect, useState } from "react";
+import Sidebar from "./components/Sidebar";
+import Home from "./pages/Home";
+import Learn from "./pages/Learn";
+import Characters from "./pages/Characters";
+import Rewards from "./pages/Rewards";
+import ParentDashboard from "./pages/ParentDashboard";
+import Game from "./pages/Game";
+import LoginScreen from "./components/LoginScreen";
+import LessonPlayer from "./components/LessonPlayer";
+import CharacterModal from "./components/CharacterModal";
+import { doctors, patients, lessons, badges } from "./data/content";
+
+export default function App() {
+  const [user, setUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("lda-demo-user")); } catch { return null; }
+  });
+  const [page, setPage] = useState("home");
+  const [activeLesson, setActiveLesson] = useState(null);
+  const [selectedCharacter, setSelectedCharacter] = useState(null);
+  const [stars, setStars] = useState(() => Number(localStorage.getItem("lda-stars") || 50));
+  const [completedLessons, setCompletedLessons] = useState(() => JSON.parse(localStorage.getItem("lda-completed") || "[]"));
+
+  useEffect(() => {
+    localStorage.setItem("lda-stars", String(stars));
+    localStorage.setItem("lda-completed", JSON.stringify(completedLessons));
+  }, [stars, completedLessons]);
+
+  function completeLesson(l) {
+    if (!completedLessons.includes(l.id)) {
+      setCompletedLessons([...completedLessons, l.id]);
+      setStars(function (s) { return s + 25; });
+    }
+  }
+  function navigate(d) { setPage(d); window.scrollTo({ top: 0, behavior: "smooth" }); }
+
+  if (!user) return <LoginScreen onLogin={function (u) { localStorage.setItem("lda-demo-user", JSON.stringify(u)); setUser(u); }} />;
+
+  const childName = user.name || "Ari";
+  function onLogout() { localStorage.removeItem("lda-demo-user"); setUser(null); }
+  function addStars(n) { setStars(function (s) { return s + n; }); }
+
+  return (
+    <div className="app app-shell">
+      <Sidebar page={page} onNavigate={navigate} childName={childName} onLogout={onLogout} />
+      <div className="app-main">
+        {page === "home" && <Home doctors={doctors} patients={patients} lessons={lessons} completedLessons={completedLessons} badges={badges} stars={stars} childName={childName} onNavigate={navigate} onSelectCharacter={setSelectedCharacter} onStartLesson={setActiveLesson} />}
+        {(page === "learn" || page === "scenarios") && <Learn lessons={lessons} onStartLesson={setActiveLesson} />}
+        {page === "characters" && <Characters doctors={doctors} patients={patients} onSelectCharacter={setSelectedCharacter} />}
+        {page === "game" && <Game onReward={addStars} />}
+        {page === "rewards" && <Rewards badges={badges} completedLessons={completedLessons} stars={stars} />}
+        {(page === "parent" || page === "settings" || page === "help") && <ParentDashboard completedLessons={completedLessons} totalLessons={lessons.length} stars={stars} />}
+        <footer className="app-footer"><span>Little Doctor Academy - Educational play, not medical advice.</span></footer>
+      </div>
+      {activeLesson && <LessonPlayer lesson={activeLesson} onClose={function () { setActiveLesson(null); }} onComplete={completeLesson} />}
+      {selectedCharacter && <CharacterModal character={selectedCharacter} onClose={function () { setSelectedCharacter(null); }} />}
+    </div>
+  );
+}

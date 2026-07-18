@@ -1,3 +1,4 @@
-Little Doctor Academy - Expanded Patient Journeys Edition
-Build: 2026-07-15-v3
-Includes: 24 interactive patient scenarios, custom login UI, Medical Match Dash game, expanded care team, scalable SVG characters
+Little Doctor Academy - Expanded v3 Reference Character Edition
+Build: 2026-07-17-v5
+Base: expanded-v3 (24 scenarios + game preserved)
+UI: supplied 3D junior doctor character style

@@ -1,21 +1,21 @@
 export const doctors = [
-  { id:"mia", name:"Dr. Mia", role:"Pediatrician", image:"/assets/characters/dr-mia.svg", color:"lavender", message:"I help children feel healthy and strong." },
-  { id:"alex", name:"Dr. Alex", role:"Urgent Care Doctor", image:"/assets/characters/dr-alex.svg", color:"mint", message:"I examine injuries and decide what care comes next." },
-  { id:"bella", name:"Nurse Bella", role:"Registered Nurse", image:"/assets/characters/nurse-bella.svg", color:"peach", message:"I welcome patients, check vital signs, and help everyone feel safe." },
-  { id:"sam", name:"Dr. Sam", role:"Dentist", image:"/assets/characters/dr-sam.svg", color:"sky", message:"I help keep teeth clean and healthy." },
-  { id:"zoe", name:"Dr. Zoe", role:"Veterinarian", image:"/assets/characters/dr-zoe.svg", color:"rose", message:"I care for animals when they are sick." },
-  { id:"oliver", name:"Oliver", role:"Pharmacist", image:"/assets/characters/pharmacist-oliver.svg", color:"lavender", message:"I explain how medicines are used safely with a grown-up." },
-  { id:"priya", name:"Dr. Priya", role:"Allergy Specialist", image:"/assets/characters/dr-priya.svg", color:"peach", message:"I help patients understand allergies and breathing problems." },
-  { id:"luca", name:"Luca", role:"X-ray Technician", image:"/assets/characters/tech-luca.svg", color:"sky", message:"I take clear pictures that help doctors look at bones." }
+  { id:"mia", name:"Dr. Mia", role:"Pediatrician", image:"/assets/characters/04-dr-mei.webp", color:"lavender", message:"I help children feel healthy and strong." },
+  { id:"alex", name:"Dr. Alex", role:"Urgent Care Doctor", image:"/assets/characters/05-dr-chen.webp", color:"mint", message:"I examine injuries and decide what care comes next." },
+  { id:"bella", name:"Nurse Bella", role:"Registered Nurse", image:"/assets/characters/11-nurse-sophia.webp", color:"peach", message:"I welcome patients, check vital signs, and help everyone feel safe." },
+  { id:"sam", name:"Dr. Sam", role:"Dentist", image:"/assets/characters/01-dr-sam.webp", color:"sky", message:"I help keep teeth clean and healthy." },
+  { id:"zoe", name:"Dr. Zoe", role:"Veterinarian", image:"/assets/characters/15-therapist-zoe.webp", color:"rose", message:"I care for animals when they are sick." },
+  { id:"oliver", name:"Oliver", role:"Pharmacist", image:"/assets/characters/14-pharmacist-oliver.webp", color:"lavender", message:"I explain how medicines are used safely with a grown-up." },
+  { id:"priya", name:"Dr. Priya", role:"Allergy Specialist", image:"/assets/characters/02-dr-priya.webp", color:"peach", message:"I help patients understand allergies and breathing problems." },
+  { id:"luca", name:"Luca", role:"X-ray Technician", image:"/assets/characters/18-luca.webp", color:"sky", message:"I take clear pictures that help doctors look at bones." }
 ];
 
 export const patients = [
-  { id:"lily", name:"Lily", age:6, image:"/assets/characters/lily.svg", symptom:"Cough and sore throat", level:"Beginner" },
-  { id:"ethan", name:"Ethan", age:8, image:"/assets/characters/ethan.svg", symptom:"Scraped knee", level:"Beginner" },
-  { id:"noah", name:"Noah", age:5, image:"/assets/characters/noah.svg", symptom:"Tummy ache", level:"Intermediate" },
-  { id:"emma", name:"Emma", age:7, image:"/assets/characters/emma.svg", symptom:"Twisted ankle", level:"Intermediate" },
-  { id:"maya", name:"Maya", age:9, image:"/assets/characters/maya.svg", symptom:"Itchy eyes", level:"Beginner" },
-  { id:"leo", name:"Leo", age:7, image:"/assets/characters/leo.svg", symptom:"Ear discomfort", level:"Intermediate" }
+  { id:"lily", name:"Lily", age:6, image:"/assets/characters/09-nurse-lily.webp", symptom:"Cough and sore throat", level:"Beginner" },
+  { id:"ethan", name:"Ethan", age:8, image:"/assets/characters/23-ethan.webp", symptom:"Scraped knee", level:"Beginner" },
+  { id:"noah", name:"Noah", age:5, image:"/assets/characters/21-noah.webp", symptom:"Tummy ache", level:"Intermediate" },
+  { id:"emma", name:"Emma", age:7, image:"/assets/characters/13-pharmacist-emma.webp", symptom:"Twisted ankle", level:"Intermediate" },
+  { id:"maya", name:"Maya", age:9, image:"/assets/characters/19-maya.webp", symptom:"Itchy eyes", level:"Beginner" },
+  { id:"leo", name:"Leo", age:7, image:"/assets/characters/20-leo.webp", symptom:"Ear discomfort", level:"Intermediate" }
 ];
 
 const makeLesson=(id,title,icon,minutes,description,patient,system,steps,question,options,answer)=>({id,title,icon,minutes,description,patient,system,steps,quiz:{question,options,answer}});
