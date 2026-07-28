@@ -14,6 +14,25 @@ image:
   repository: int-production-use1-ecs
   pullPolicy: Always
 
+# Amazon Cognito User Pool parents/guardians authenticate against (see
+# deploy/terraform/cognito and src/auth/cognito.js). The container's
+# entrypoint (docker/50-generate-env-config.sh) reads these as env vars at
+# startup and writes them to /config/env-config.js, which index.html loads
+# before the app bundle - so the same image can move between dev/staging/
+# prod pools without a rebuild.
+#
+# Preferred for production: create the Secret out-of-band (Terraform,
+# External Secrets, kubectl, etc.) with keys VITE_COGNITO_USER_POOL_ID /
+# VITE_COGNITO_CLIENT_ID / VITE_COGNITO_REGION, and set existingSecret to
+# its name. Leave existingSecret empty and this chart creates the Secret
+# from the plain values below instead (fine for dev, but the values then
+# live in your values file / --set history).
+cognito:
+  existingSecret: ""
+  userPoolId: ""
+  clientId: ""
+  region: "us-east-1"
+
 frontend:
   name: littledoctor
   component: frontend # value for the "component" label / selector
@@ -44,3 +63,69 @@ frontend:
     limits:
       cpu: 100m
       memory: 128Mi
+  # Dedicated ServiceAccount for the pod. The app never talks to the K8s
+  # API, so the projected token is disabled.
+  serviceAccount:
+    create: true
+    name: ""
+    automount: false
+  # nginx-unprivileged (Dockerfile) runs as a non-root uid with a read-only
+  # root filesystem, so every path nginx writes to at startup has to be an
+  # explicit writable volume - see the deployment's volumes (cache, run,
+  # tmp, the envsubst'd nginx.conf, and the generated env-config.js) and
+  # nginx.conf.template / docker/50-generate-env-config.sh / docker-compose.yml.
+  podSecurityContext:
+    runAsNonRoot: true
+    # Matches the nginx-unprivileged image's "nginx" user/group (uid/gid
+    # 101) so the kubelet-chowned emptyDir volumes are actually writable.
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+# HorizontalPodAutoscaler for the frontend Deployment.
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Restricts the frontend pods to only the traffic they actually need:
+# inbound from anywhere in the cluster (the ALB reaches pods directly via
+# target-type ip) on the app port, and outbound DNS. Cognito calls happen
+# client-side from the parent's browser (amazon-cognito-identity-js), not
+# from the pod, so no extra egress is required for auth.
+networkPolicy:
+  enabled: true
+
+ingress:
+  ingressclassname: alb
+  ingressname: littledoctor-ingress
+  alb_name: littledoctor-alb
+  scheme: internet-facing
+  controller: ingress.k8s.aws/alb
+  # ip = register pod IPs directly as ALB targets (via VPC CNI).
+  target_type: ip
+  group_name: littledoctor-alb
+  healthcheck:
+    healthcheck-protocol: "HTTP"
+    healthcheck-port: "traffic-port"
+    healthcheck-path: "/healthz"
+    healthcheck-interval-seconds: "15"
+    healthcheck-timeout-seconds: "5"
+    success-codes: "200"
+    healthy-threshold-count: "2"
+    unhealthy-threshold-count: "2"
+  # Leave blank to skip HTTPS/the ssl-redirect rule (e.g. local/dev clusters
+  # without an ACM cert yet).
+  alb_certificate_arn: ""
+  listenning_ports: '[{"HTTPS":443}, {"HTTP":80}]'
+  hostname: "doctor.example.com"

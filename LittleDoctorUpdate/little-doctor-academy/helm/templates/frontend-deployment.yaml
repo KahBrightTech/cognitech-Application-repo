@@ -17,14 +17,44 @@ spec:
       labels:
         app: {{ .Values.global.appLabel }}
         component: {{ .Values.frontend.component }}
+      annotations:
+        {{- if not .Values.cognito.existingSecret }}
+        # Forces a pod restart when the chart-managed Cognito secret changes.
+        checksum/cognito-secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
     spec:
+      serviceAccountName: {{ include "littledoctor.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.frontend.podSecurityContext | nindent 8 }}
       containers:
         - name: frontend
           image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.frontend.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.frontend.containerSecurityContext | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.frontend.containerPort }}
+          # Cognito pool/client, wired in as env vars and turned into
+          # /config/env-config.js by docker/50-generate-env-config.sh at
+          # container startup (see values.yaml "cognito" for how the Secret
+          # is sourced).
+          env:
+            - name: VITE_COGNITO_USER_POOL_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "littledoctor.cognitoSecretName" . }}
+                  key: VITE_COGNITO_USER_POOL_ID
+            - name: VITE_COGNITO_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "littledoctor.cognitoSecretName" . }}
+                  key: VITE_COGNITO_CLIENT_ID
+            - name: VITE_COGNITO_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "littledoctor.cognitoSecretName" . }}
+                  key: VITE_COGNITO_REGION
           readinessProbe:
             httpGet:
               path: {{ .Values.frontend.probes.readiness.path }}
@@ -39,3 +69,30 @@ spec:
             periodSeconds: {{ .Values.frontend.probes.liveness.periodSeconds }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+          volumeMounts:
+            # readOnlyRootFilesystem is enabled, so nginx needs explicit
+            # writable mounts for everything it touches at startup/runtime:
+            # its cache dir, its pid file, /tmp, the nginx.conf rendered
+            # from nginx.conf.template via envsubst, and the
+            # /config/env-config.js written by the entrypoint script.
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
+            - name: html-config
+              mountPath: /usr/share/nginx/html/config
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: nginx-conf
+          emptyDir: {}
+        - name: html-config
+          emptyDir: {}

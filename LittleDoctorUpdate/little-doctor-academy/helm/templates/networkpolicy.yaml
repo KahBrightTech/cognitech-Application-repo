@@ -1,0 +1,38 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "littledoctor.labels" . | nindent 4 }}
+    component: {{ .Values.frontend.component }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Values.global.appLabel }}
+      component: {{ .Values.frontend.component }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    # ALB target-type "ip" reaches pods directly from anywhere in the
+    # cluster/VPC, so this stays open to any namespace rather than pinned
+    # to a specific ALB controller pod CIDR.
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.frontend.containerPort }}
+  egress:
+    # DNS only - the app has no backend to call. Cognito sign-in/sign-up
+    # (src/auth/cognito.js) happens client-side in the parent's browser,
+    # not from this pod, so no egress to Cognito's API is needed here.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}

@@ -20,3 +20,9 @@ variable "callback_urls" {
   type        = list(string)
   default     = []
 }
+
+variable "secret_name" {
+  description = "Name prefix for the AWS Secrets Manager secret that VITE_COGNITO_USER_POOL_ID / VITE_COGNITO_CLIENT_ID / VITE_COGNITO_REGION are written to after the pool/client are created - see secrets.tf."
+  type        = string
+  default     = "little-doctor-academy/cognito"
+}
