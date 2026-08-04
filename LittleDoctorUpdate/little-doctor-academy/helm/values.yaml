@@ -56,6 +56,11 @@ frontend:
     fsGroup: 101
     seccompProfile:
       type: RuntimeDefault
+  nodeSelector:
+    managed-by: karpenter
+    workload-type: general
+  tolerations: []
+  affinity: {}
   containerSecurityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
