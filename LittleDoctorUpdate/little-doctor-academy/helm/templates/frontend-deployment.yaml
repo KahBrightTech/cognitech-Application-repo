@@ -18,9 +18,11 @@ spec:
         app: {{ .Values.global.appLabel }}
         component: {{ .Values.frontend.component }}
       annotations:
-        {{- if not .Values.cognito.existingSecret }}
-        # Forces a pod restart when the chart-managed Cognito secret changes.
+        {{- if and (not .Values.cognito.existingSecret) (not .Values.cognito.secretManager.enabled) }}
         checksum/cognito-secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if .Values.cognito.secretManager.enabled }}
+        checksum/cognito-secret-provider: {{ include (print $.Template.BasePath "/secretproviderclass.yaml") . | sha256sum }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "littledoctor.serviceAccountName" . }}
@@ -35,26 +37,6 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.frontend.containerPort }}
-          # Cognito pool/client, wired in as env vars and turned into
-          # /config/env-config.js by docker/50-generate-env-config.sh at
-          # container startup (see values.yaml "cognito" for how the Secret
-          # is sourced).
-          env:
-            - name: VITE_COGNITO_USER_POOL_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "littledoctor.cognitoSecretName" . }}
-                  key: VITE_COGNITO_USER_POOL_ID
-            - name: VITE_COGNITO_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "littledoctor.cognitoSecretName" . }}
-                  key: VITE_COGNITO_CLIENT_ID
-            - name: VITE_COGNITO_REGION
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "littledoctor.cognitoSecretName" . }}
-                  key: VITE_COGNITO_REGION
           readinessProbe:
             httpGet:
               path: {{ .Values.frontend.probes.readiness.path }}
@@ -70,11 +52,6 @@ spec:
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           volumeMounts:
-            # readOnlyRootFilesystem is enabled, so nginx needs explicit
-            # writable mounts for everything it touches at startup/runtime:
-            # its cache dir, its pid file, /tmp, the nginx.conf rendered
-            # from nginx.conf.template via envsubst, and the
-            # /config/env-config.js written by the entrypoint script.
             - name: nginx-cache
               mountPath: /var/cache/nginx
             - name: nginx-run
@@ -85,6 +62,15 @@ spec:
               mountPath: /etc/nginx/conf.d
             - name: html-config
               mountPath: /usr/share/nginx/html/config
+            {{- if .Values.cognito.secretManager.enabled }}
+            - name: {{ include "littledoctor.cognitoSecretProviderClassName" . }}
+              mountPath: /etc/secrets
+              readOnly: true
+            {{- else }}
+            - name: cognito-secret
+              mountPath: /etc/secrets
+              readOnly: true
+            {{- end }}
       volumes:
         - name: nginx-cache
           emptyDir: {}
@@ -96,3 +82,15 @@ spec:
           emptyDir: {}
         - name: html-config
           emptyDir: {}
+        {{- if .Values.cognito.secretManager.enabled }}
+        - name: {{ include "littledoctor.cognitoSecretProviderClassName" . }}
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "littledoctor.cognitoSecretProviderClassName" . | quote }}
+        {{- else }}
+        - name: cognito-secret
+          secret:
+            secretName: {{ include "littledoctor.cognitoSecretName" . }}
+        {{- end }}

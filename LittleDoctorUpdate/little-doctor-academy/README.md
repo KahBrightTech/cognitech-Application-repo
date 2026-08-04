@@ -26,7 +26,7 @@ A Dockerized, responsive React application that gives children a safe, playful i
 
 ```bash
 npm install
-cp .env.example .env   # fill in VITE_COGNITO_* (see "Authentication" below)
+cp .env.example .env   # fill in COGNITO_* (see "Authentication" below)
 npm run dev
 ```
 
@@ -60,7 +60,7 @@ Prerequisites:
 - Metrics Server for HPA
 - GitHub OIDC IAM role with ECR and EKS deployment permissions
 
-Update the values (fill in the `cognito.*` values from `terraform output` in `deploy/terraform/cognito`, or swap them for `--set cognito.existingSecret=your-secret-name` if you manage that Secret separately):
+Update the values. You can either fill in `cognito.*` from `terraform output`, point `cognito.existingSecret` at a Kubernetes Secret you already manage, or enable the Secrets Manager path and use the Terraform-created IRSA ServiceAccount:
 
 ```bash
 helm upgrade --install little-doctor-academy deploy/helm/little-doctor-academy \
@@ -69,6 +69,8 @@ helm upgrade --install little-doctor-academy deploy/helm/little-doctor-academy \
   --set image.tag=1.0.0 \
   --set ingress.host=doctor.example.com \
   --set ingress.certificateArn=arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERT_ID \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=little-doctor-irsa \
   --set cognito.userPoolId=us-east-1_XXXXXXXXX \
   --set cognito.clientId=XXXXXXXXXXXXXXXXXXXXXXXXXX \
   --set cognito.region=us-east-1 \
@@ -122,10 +124,10 @@ Parent/guardian sign-in is backed by a real Amazon Cognito User Pool (via `amazo
 
 **Provisioning the pool:** the User Pool and app client are defined as Terraform in `deploy/terraform/cognito`, which calls the shared `AWS-Cognito` module from the [Cognitech-terraform-iac-modules](https://github.com/KahBrightTech/Cognitech-terraform-iac-modules) repo. Run `terraform apply` there first (see that folder's README).
 
-**Wiring the app to the pool:** the pool ID/client ID/region are injected at **container startup**, not baked into the build. `docker/50-generate-env-config.sh` runs automatically when the container starts (it's dropped into nginx's `/docker-entrypoint.d/`), reads `VITE_COGNITO_USER_POOL_ID` / `VITE_COGNITO_CLIENT_ID` / `VITE_COGNITO_REGION` from the container's env, and writes them to `/config/env-config.js`, which `index.html` loads before the app bundle. `src/auth/cognito.js` reads `window.__ENV__` first and only falls back to Vite's build-time `import.meta.env.VITE_*` when running outside a container (e.g. `npm run dev`). One consequence: the same built image can be deployed against dev/staging/prod pools just by changing env vars/secrets - no rebuild needed.
+**Wiring the app to the pool:** the pool ID/client ID/region are injected at **container startup**, not baked into the build. `docker/50-generate-env-config.sh` runs automatically when the container starts (it's dropped into nginx's `/docker-entrypoint.d/`), reads `COGNITO_USER_POOL_ID` / `COGNITO_CLIENT_ID` / `COGNITO_REGION` from mounted secrets or the container env, and writes them to `/config/env-config.js`, which `index.html` loads before the app bundle. `src/auth/cognito.js` reads `window.__ENV__` first and only falls back to build-time `import.meta.env.COGNITO_*` when running outside a container (e.g. `npm run dev`). One consequence: the same built image can be deployed against dev/staging/prod pools just by changing env vars/secrets - no rebuild needed.
 
 - Local dev (`npm run dev` / `npm run preview`, no Docker): copy `.env.example` to `.env` and fill in the three values from the Terraform outputs.
 - Docker Compose: same three vars, but as regular environment variables Compose reads from a root `.env` file (see `docker-compose.yml`) - not build args.
-- Kubernetes/Helm: set `cognito.userPoolId`, `cognito.clientId`, `cognito.region` in `deploy/helm/little-doctor-academy/values.yaml` (or `--set`), or point `cognito.existingSecret` at a Secret you manage separately (Terraform, External Secrets, etc.) with keys `VITE_COGNITO_USER_POOL_ID` / `VITE_COGNITO_CLIENT_ID` / `VITE_COGNITO_REGION`. The chart injects these into the pod via `secretKeyRef`.
+- Kubernetes/Helm: set `cognito.userPoolId`, `cognito.clientId`, `cognito.region` in `deploy/helm/little-doctor-academy/values.yaml` (or `--set`), point `cognito.existingSecret` at a Secret you manage separately, or enable `cognito.secretManager.enabled=true` to have the chart create an AWS Secrets Store CSI `SecretProviderClass` and mount the AWS secret at `/etc/secrets`. For that last mode, use the IRSA-enabled ServiceAccount created by Terraform by setting `serviceAccount.create=false` and `serviceAccount.name=<terraform-service-account-name>`.
 
 There is still no backend API for this app (see the roadmap below) - once one exists, it should validate the Cognito-issued JWT on every request rather than trusting the client.

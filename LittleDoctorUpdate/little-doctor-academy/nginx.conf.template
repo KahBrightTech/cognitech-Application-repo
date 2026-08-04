@@ -10,9 +10,9 @@ server {
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
     # connect-src allows calls to Cognito's regional API endpoint - the
     # region is filled in at container startup (envsubst, see
-    # /etc/nginx/templates) from the VITE_COGNITO_REGION env var so this
+    # /etc/nginx/templates) from the COGNITO_REGION env var so this
     # stays correct wherever the pool actually lives, without a rebuild.
-    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self' https://cognito-idp.${VITE_COGNITO_REGION}.amazonaws.com; frame-ancestors 'none';" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self' https://cognito-idp.${COGNITO_REGION}.amazonaws.com; frame-ancestors 'none';" always;
 
     location = /healthz {
         access_log off;

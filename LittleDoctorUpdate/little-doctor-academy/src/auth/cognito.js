@@ -13,7 +13,7 @@ import {
 //     the path used in production - the same built image works against
 //     any pool without a rebuild.
 //  2. Build time (plain `npm run dev` / `npm run build`, no container):
-//     falls back to import.meta.env.VITE_*, populated from a local .env
+//     falls back to import.meta.env.COGNITO_*, populated from a local .env
 //     file (see .env.example).
 function readEnv(key) {
   if (typeof window !== "undefined" && window.__ENV__ && window.__ENV__[key]) {
@@ -25,11 +25,11 @@ function readEnv(key) {
 let pool = null;
 
 function getUserPool() {
-  const userPoolId = readEnv("VITE_COGNITO_USER_POOL_ID");
-  const clientId = readEnv("VITE_COGNITO_CLIENT_ID");
+  const userPoolId = readEnv("COGNITO_USER_POOL_ID");
+  const clientId = readEnv("COGNITO_CLIENT_ID");
   if (!userPoolId || !clientId) {
     throw new Error(
-      "Cognito is not configured. Set VITE_COGNITO_USER_POOL_ID and VITE_COGNITO_CLIENT_ID (see .env.example, or deploy/terraform/cognito for Docker/Helm)."
+      "Cognito is not configured. Set COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID (see .env.example, or deploy/terraform/cognito for Docker/Helm)."
     );
   }
   if (!pool) {

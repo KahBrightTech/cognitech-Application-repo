@@ -19,8 +19,20 @@ in secret.yaml.
 {{- end -}}
 
 {{/*
+Name of the SecretProviderClass used when Cognito values are sourced from
+AWS Secrets Manager through the Secrets Store CSI driver.
+*/}}
+{{- define "littledoctor.cognitoSecretProviderClassName" -}}
+{{- .Values.cognito.secretManager.secretProviderClassName | default (printf "%s-cognito" .Values.frontend.name) -}}
+{{- end -}}
+
+{{/*
 ServiceAccount name used by the frontend pod.
 */}}
 {{- define "littledoctor.serviceAccountName" -}}
+{{- if .Values.frontend.serviceAccount.create -}}
 {{- .Values.frontend.serviceAccount.name | default .Values.frontend.name -}}
+{{- else -}}
+{{- required "frontend.serviceAccount.name is required when frontend.serviceAccount.create=false" .Values.frontend.serviceAccount.name -}}
+{{- end -}}
 {{- end -}}

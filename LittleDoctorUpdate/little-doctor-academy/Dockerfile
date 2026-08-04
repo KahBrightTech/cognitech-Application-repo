@@ -30,9 +30,9 @@ COPY docker/50-generate-env-config.sh /docker-entrypoint.d/50-generate-env-confi
 RUN chmod +x /docker-entrypoint.d/50-generate-env-config.sh
 
 # Sensible default so the container still starts with a valid CSP even if
-# VITE_COGNITO_REGION isn't set; Helm/compose should still set the real
+# COGNITO_REGION isn't set; Helm/compose should still set the real
 # values for auth to actually work.
-ENV VITE_COGNITO_REGION=us-east-1
+ENV COGNITO_REGION=us-east-1
 
 USER nginx
 COPY --from=build /app/dist /usr/share/nginx/html

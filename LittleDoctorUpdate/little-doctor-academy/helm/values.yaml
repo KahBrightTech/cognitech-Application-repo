@@ -1,52 +1,35 @@
-# Default values for the LittleDoctor chart.
-# Override at deploy time (e.g. via --set or a values-<env>.yaml file).
-# ALL tunable settings live in this file - templates contain no hardcoded values.
 global:
-  # Namespace to deploy into. Overridden by the workflow's namespace input.
-  namespace: healthpath
-  # Common "app" label used in selectors and pod labels for every component.
+  namespace: infogrid
   appLabel: littledoctor
 
 image:
-  # Full ECR registry host + repository. Components share this repo and
-  # are distinguished by their image tag (see frontend.image.tag).
   registry: 271457809232.dkr.ecr.us-east-1.amazonaws.com
   repository: int-production-use1-ecs
   pullPolicy: Always
 
-# Amazon Cognito User Pool parents/guardians authenticate against (see
-# deploy/terraform/cognito and src/auth/cognito.js). The container's
-# entrypoint (docker/50-generate-env-config.sh) reads these as env vars at
-# startup and writes them to /config/env-config.js, which index.html loads
-# before the app bundle - so the same image can move between dev/staging/
-# prod pools without a rebuild.
-#
-# Preferred for production: create the Secret out-of-band (Terraform,
-# External Secrets, kubectl, etc.) with keys VITE_COGNITO_USER_POOL_ID /
-# VITE_COGNITO_CLIENT_ID / VITE_COGNITO_REGION, and set existingSecret to
-# its name. Leave existingSecret empty and this chart creates the Secret
-# from the plain values below instead (fine for dev, but the values then
-# live in your values file / --set history).
 cognito:
   existingSecret: ""
   userPoolId: ""
   clientId: ""
   region: "us-east-1"
+  secretManager:
+    enabled: true
+    secretName: int-production-use1-little-doctor-users/cognitofff0b469a6496e0ce3b12995de
+    objectType: secretsmanager
+    secretProviderClassName: ""
 
 frontend:
   name: littledoctor
-  component: frontend # value for the "component" label / selector
+  component: frontend
   replicaCount: 2
   image:
-    tag: littledoctor-little-doctor-academy-v1.0.1
-  # Port the nginx container listens on (Dockerfile EXPOSE / nginx.conf "listen 8080").
+    tag: littledoctor-little-doctor-academy-v1.0.8
   containerPort: 8080
   service:
-    type: NodePort # ClusterIP | NodePort | LoadBalancer
+    type: NodePort
     port: 80
-    nodePort: 30080 # used only when service.type == NodePort
-    targetPort: 8080 # must match frontend.containerPort
-  # Health endpoint served by nginx (nginx.conf "location = /healthz").
+    nodePort: 30080
+    targetPort: 8080
   probes:
     readiness:
       path: /healthz
@@ -63,21 +46,13 @@ frontend:
     limits:
       cpu: 100m
       memory: 128Mi
-  # Dedicated ServiceAccount for the pod. The app never talks to the K8s
-  # API, so the projected token is disabled.
   serviceAccount:
-    create: true
-    name: ""
+    create: false
+    name: secret-access
     automount: false
-  # nginx-unprivileged (Dockerfile) runs as a non-root uid with a read-only
-  # root filesystem, so every path nginx writes to at startup has to be an
-  # explicit writable volume - see the deployment's volumes (cache, run,
-  # tmp, the envsubst'd nginx.conf, and the generated env-config.js) and
-  # nginx.conf.template / docker/50-generate-env-config.sh / docker-compose.yml.
+    annotations: {}
   podSecurityContext:
     runAsNonRoot: true
-    # Matches the nginx-unprivileged image's "nginx" user/group (uid/gid
-    # 101) so the kubelet-chowned emptyDir volumes are actually writable.
     fsGroup: 101
     seccompProfile:
       type: RuntimeDefault
@@ -85,7 +60,7 @@ frontend:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     capabilities:
-      drop: ["ALL"]
+      drop: [ "ALL" ]
 
 # HorizontalPodAutoscaler for the frontend Deployment.
 autoscaling:
@@ -97,12 +72,6 @@ autoscaling:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
-
-# Restricts the frontend pods to only the traffic they actually need:
-# inbound from anywhere in the cluster (the ALB reaches pods directly via
-# target-type ip) on the app port, and outbound DNS. Cognito calls happen
-# client-side from the parent's browser (amazon-cognito-identity-js), not
-# from the pod, so no extra egress is required for auth.
 networkPolicy:
   enabled: true
 
