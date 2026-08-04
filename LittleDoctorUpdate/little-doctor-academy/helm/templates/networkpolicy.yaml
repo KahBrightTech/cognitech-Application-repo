@@ -23,9 +23,7 @@ spec:
         - protocol: TCP
           port: {{ .Values.frontend.containerPort }}
   egress:
-    # DNS only - the app has no backend to call. Cognito sign-in/sign-up
-    # (src/auth/cognito.js) happens client-side in the parent's browser,
-    # not from this pod, so no egress to Cognito's API is needed here.
+    # Allow DNS lookups to the cluster resolver.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -35,4 +33,13 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    # Temporary broad web egress for outbound API calls.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
 {{- end }}

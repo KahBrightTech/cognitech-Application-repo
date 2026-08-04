@@ -95,6 +95,6 @@ ingress:
     unhealthy-threshold-count: "2"
   # Leave blank to skip HTTPS/the ssl-redirect rule (e.g. local/dev clusters
   # without an ACM cert yet).
-  alb_certificate_arn: ""
+  alb_certificate_arn: "arn:aws:acm:us-east-1:271457809232:certificate/31b4636f-d7d5-4109-80f2-6892489df997"
   listenning_ports: '[{"HTTPS":443}, {"HTTP":80}]'
-  hostname: "doctor.example.com"
+  hostname: "littledoctor.prod.novutechnologies.net"

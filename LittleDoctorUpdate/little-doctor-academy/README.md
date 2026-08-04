@@ -24,6 +24,8 @@ A Dockerized, responsive React application that gives children a safe, playful i
 
 ## Local development
 
+For an end-to-end walkthrough of the app, runtime config, secrets flow, and Helm deployment, see `HOW_IT_WORKS.md`.
+
 ```bash
 npm install
 cp .env.example .env   # fill in COGNITO_* (see "Authentication" below)
