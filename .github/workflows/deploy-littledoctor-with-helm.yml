@@ -41,6 +41,7 @@ on:
         type: choice
         options:
           - deploy
+          - cleanup
           - rollback
           - uninstall
         default: deploy
@@ -199,6 +200,31 @@ jobs:
 
           helm "${HELM_ARGS[@]}"
 
+      - name: Cleanup stuck Helm release metadata
+        if: steps.settings.outputs.action == 'cleanup'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t RELEASE_SECRETS < <(
+            kubectl get secrets \
+              --namespace "${K8S_NAMESPACE}" \
+              -l "owner=helm,name=${RELEASE_NAME}" \
+              -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort -V
+          )
+
+          if [[ ${#RELEASE_SECRETS[@]} -eq 0 ]]; then
+            echo "No Helm release secrets found for ${RELEASE_NAME} in ${K8S_NAMESPACE}."
+            exit 0
+          fi
+
+          echo "Deleting Helm release secrets for ${RELEASE_NAME}:"
+          printf ' - %s\n' "${RELEASE_SECRETS[@]}"
+
+          kubectl delete secret \
+            --namespace "${K8S_NAMESPACE}" \
+            "${RELEASE_SECRETS[@]}"
+
       - name: Rollback release
         if: steps.settings.outputs.action == 'rollback'
         shell: bash
@@ -239,6 +265,21 @@ jobs:
 
           kubectl get services \
             --namespace "${K8S_NAMESPACE}"
+
+      - name: Verify cleanup
+        if: steps.settings.outputs.action == 'cleanup'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if helm status "${RELEASE_NAME}" --namespace "${K8S_NAMESPACE}" >/dev/null 2>&1; then
+            echo "Helm still reports a release named ${RELEASE_NAME}."
+            exit 1
+          fi
+
+          kubectl get secrets \
+            --namespace "${K8S_NAMESPACE}" \
+            -l "owner=helm,name=${RELEASE_NAME}"
 
       - name: Summary
         if: always()
