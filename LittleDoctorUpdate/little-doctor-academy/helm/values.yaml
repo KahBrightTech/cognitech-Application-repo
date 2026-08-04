@@ -23,7 +23,7 @@ frontend:
   component: frontend
   replicaCount: 2
   image:
-    tag: littledoctor-little-doctor-academy-v1.0.8
+    tag: littledoctor-little-doctor-academy-v1.0.9
   containerPort: 8080
   service:
     type: NodePort

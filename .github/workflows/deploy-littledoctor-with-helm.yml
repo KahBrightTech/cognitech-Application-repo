@@ -1,0 +1,265 @@
+name: deploy-littledoctor-with-helm
+
+# =============================================================================
+# App-specific Helm deployment workflow for Little Doctor Academy.
+#
+# TRIGGERS
+#   - push to main touching anything under LittleDoctorUpdate/little-doctor-academy/helm/
+#   - manual run with an optional values file override and optional image tag override
+#
+# BEHAVIOR
+#   - push runs always deploy using the default chart values file
+#   - manual runs default to the same values file but can override it
+#   - frontend_tag is optional; when left empty the chart's values file controls
+#     the image tag
+# =============================================================================
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'LittleDoctorUpdate/little-doctor-academy/helm/**'
+
+  workflow_dispatch:
+    inputs:
+      values_file:
+        description: 'Optional values file relative to the repository root'
+        required: false
+        type: string
+        default: 'LittleDoctorUpdate/little-doctor-academy/helm/values.yaml'
+
+      frontend_tag:
+        description: 'Optional frontend ECR image tag. Empty = use the values file setting'
+        required: false
+        type: string
+        default: ''
+
+      action:
+        description: 'Deployment action'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - rollback
+          - uninstall
+        default: deploy
+
+      dry_run:
+        description: 'Render the Helm deployment without applying it'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: int-production-use1-ecs
+  IMAGE_REGISTRY: 271457809232.dkr.ecr.us-east-1.amazonaws.com
+  EKS_CLUSTER_NAME: int-production-use1-prod-novutech-eks-cluster
+  IAM_ROLE: arn:aws:iam::271457809232:role/int-prod-OIDCGitHubRole-role
+  CHART_PATH: LittleDoctorUpdate/little-doctor-academy/helm
+  DEFAULT_VALUES_FILE: LittleDoctorUpdate/little-doctor-academy/helm/values.yaml
+  RELEASE_NAME: littledoctor
+  K8S_NAMESPACE: infogrid
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Little Doctor with Helm
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve workflow settings
+        id: settings
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ACTION="deploy"
+          DRY_RUN="false"
+          VALUES_FILE="${DEFAULT_VALUES_FILE}"
+          FRONTEND_TAG=""
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ACTION="${{ inputs.action }}"
+            DRY_RUN="${{ inputs.dry_run }}"
+            FRONTEND_TAG="${{ inputs.frontend_tag }}"
+
+            if [[ -n "${{ inputs.values_file }}" ]]; then
+              VALUES_FILE="${{ inputs.values_file }}"
+            fi
+          fi
+
+          echo "action=${ACTION}" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${DRY_RUN}" >> "$GITHUB_OUTPUT"
+          echo "values_file=${VALUES_FILE}" >> "$GITHUB_OUTPUT"
+          echo "frontend_tag=${FRONTEND_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate resolved inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Chart path: ${CHART_PATH}"
+          echo "Release name: ${RELEASE_NAME}"
+          echo "Namespace: ${K8S_NAMESPACE}"
+          echo "Values file: ${{ steps.settings.outputs.values_file }}"
+          echo "Action: ${{ steps.settings.outputs.action }}"
+
+          if [[ ! -f "${CHART_PATH}/Chart.yaml" ]]; then
+            echo "Chart.yaml was not found at ${CHART_PATH}/Chart.yaml"
+            echo
+            echo "Available Chart.yaml files:"
+            find . -type f -name Chart.yaml -print || true
+            exit 1
+          fi
+
+          if [[ -n "${{ steps.settings.outputs.values_file }}" && ! -f "${{ steps.settings.outputs.values_file }}" ]]; then
+            echo "Values file was not found: ${{ steps.settings.outputs.values_file }}"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE }}
+          role-session-name: GitHubActions-LittleDoctor-Helm-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Update kubeconfig
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          aws eks update-kubeconfig \
+            --name "${EKS_CLUSTER_NAME}" \
+            --region "${AWS_REGION}"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Verify frontend image exists in ECR
+        if: steps.settings.outputs.action == 'deploy' && steps.settings.outputs.frontend_tag != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking exact ECR image tag: ${{ steps.settings.outputs.frontend_tag }}"
+
+          aws ecr describe-images \
+            --repository-name "${ECR_REPOSITORY}" \
+            --region "${AWS_REGION}" \
+            --image-ids "imageTag=${{ steps.settings.outputs.frontend_tag }}" \
+            >/dev/null
+
+      - name: Deploy with Helm
+        if: steps.settings.outputs.action == 'deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          HELM_ARGS=(
+            upgrade
+            --install
+            "${RELEASE_NAME}"
+            "${CHART_PATH}"
+            --namespace "${K8S_NAMESPACE}"
+            --create-namespace
+            --set-string "global.namespace=${K8S_NAMESPACE}"
+            --set-string "image.registry=${IMAGE_REGISTRY}"
+            --set-string "image.repository=${ECR_REPOSITORY}"
+            --values "${{ steps.settings.outputs.values_file }}"
+            --wait
+            --timeout 10m
+          )
+
+          if [[ -n "${{ steps.settings.outputs.frontend_tag }}" ]]; then
+            echo "Using exact frontend image tag override: ${{ steps.settings.outputs.frontend_tag }}"
+            HELM_ARGS+=(--set-string "frontend.image.tag=${{ steps.settings.outputs.frontend_tag }}")
+          else
+            echo "Using frontend.image.tag from ${{ steps.settings.outputs.values_file }}"
+          fi
+
+          if [[ "${{ steps.settings.outputs.dry_run }}" == "true" ]]; then
+            HELM_ARGS+=(--dry-run --debug)
+          else
+            HELM_ARGS+=(--rollback-on-failure)
+          fi
+
+          helm "${HELM_ARGS[@]}"
+
+      - name: Rollback release
+        if: steps.settings.outputs.action == 'rollback'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm rollback \
+            "${RELEASE_NAME}" \
+            --namespace "${K8S_NAMESPACE}" \
+            --wait \
+            --timeout 10m
+
+      - name: Uninstall release
+        if: steps.settings.outputs.action == 'uninstall'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm uninstall \
+            "${RELEASE_NAME}" \
+            --namespace "${K8S_NAMESPACE}" \
+            --wait \
+            --timeout 10m
+
+      - name: Verify deployment
+        if: steps.settings.outputs.action == 'deploy' && steps.settings.outputs.dry_run == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm status \
+            "${RELEASE_NAME}" \
+            --namespace "${K8S_NAMESPACE}"
+
+          kubectl get pods \
+            --namespace "${K8S_NAMESPACE}" \
+            -o wide
+
+          kubectl get services \
+            --namespace "${K8S_NAMESPACE}"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Little Doctor Helm ${{ steps.settings.outputs.action }}"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Release | \`${RELEASE_NAME}\` |"
+            echo "| Namespace | \`${K8S_NAMESPACE}\` |"
+            echo "| Chart | \`${CHART_PATH}\` |"
+            echo "| Values file | \`${{ steps.settings.outputs.values_file }}\` |"
+            echo "| ECR repository | \`${ECR_REPOSITORY}\` |"
+            echo "| Image registry | \`${IMAGE_REGISTRY}\` |"
+            echo "| Cluster | \`${EKS_CLUSTER_NAME}\` |"
+
+            if [[ -n "${{ steps.settings.outputs.frontend_tag }}" ]]; then
+              echo "| Frontend tag override | \`${{ steps.settings.outputs.frontend_tag }}\` |"
+            else
+              echo "| Frontend tag override | _(using values file)_ |"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
