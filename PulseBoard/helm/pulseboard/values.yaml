@@ -106,6 +106,9 @@ frontend:
   replicaCount: 1
   image:
     tag: pulseboard-frontend-latest
+  # nginx in the frontend pod proxies browser /api requests to the backend
+  # Kubernetes Service below. By templating that config in Helm, production
+  # routing stays aligned with backend.name/backend.service.port values.
   service:
     type: NodePort # ClusterIP | NodePort | LoadBalancer
     port: 80
