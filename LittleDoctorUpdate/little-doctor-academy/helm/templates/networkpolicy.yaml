@@ -16,6 +16,9 @@ spec:
   ingress:
     - from:
         - namespaceSelector: {}
+        # ALB target-type=ip sends traffic from VPC source IPs rather than
+        # from Kubernetes pods, so CIDR-based allows are needed for the ALB
+        # to reach the frontend even when namespaceSelector rules exist.
         {{- range .Values.networkPolicy.ingressCidrs }}
         - ipBlock:
             cidr: {{ . | quote }}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, Eye, LockKeyhole, Mail, ShieldCheck, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Eye, HeartPulse, LockKeyhole, Mail, ShieldCheck, Stethoscope, Trophy, UserRound } from "lucide-react";
 import {
   signUp,
   confirmSignUp,
@@ -165,14 +165,13 @@ export default function LoginScreen(props) {
       <span className="login-blob login-blob-a" aria-hidden="true" />
       <span className="login-blob login-blob-b" aria-hidden="true" />
       <span className="login-blob login-blob-c" aria-hidden="true" />
-      <span className="login-sticker login-sticker-a" aria-hidden="true">🩺</span>
-      <span className="login-sticker login-sticker-b" aria-hidden="true">💊</span>
-      <span className="login-sticker login-sticker-c" aria-hidden="true">⭐</span>
-      <span className="login-sticker login-sticker-d" aria-hidden="true">🐾</span>
 
       <section className="login-card-wrap">
         <div className="login-character">
-          <img src="/assets/characters/01-dr-sam.webp" alt="Smiling junior doctor character" />
+          <div className="login-character-panel">
+            <span className="login-character-tag">Meet Dr. Sam</span>
+            <img src="/assets/characters/01-dr-sam.webp" alt="Smiling junior doctor character" />
+          </div>
         </div>
 
         <form className="login-card" onSubmit={submit}>
@@ -183,8 +182,13 @@ export default function LoginScreen(props) {
           )}
 
           <div className="login-logo">
-            <span>🏥</span>
+            <span><Stethoscope size={24} /></span>
             <div><strong>Little Doctor</strong><small>ACADEMY</small></div>
+          </div>
+
+          <div className="login-badges" aria-label="Little Doctor highlights">
+            <span><HeartPulse size={16} /> Calm sign-in for parents</span>
+            <span><BookOpen size={16} /> Kid-friendly lessons inside</span>
           </div>
 
           {mode === "signin" && <>
@@ -274,13 +278,8 @@ export default function LoginScreen(props) {
 
           {mode === "signin" && <>
             <button type="button" className="forgot-link" onClick={function () { changeMode("forgot"); }}>Forgot Password?</button>
-            <div className="social-divider"><span>or sign in with</span></div>
-            <div className="social-row">
-              <button type="button" aria-label="Google demo">G</button>
-              <button type="button" aria-label="Apple demo">●</button>
-              <button type="button" aria-label="Child profile demo">🧒</button>
-            </div>
-            <button type="button" className="create-account-cta" onClick={function () { changeMode("signup"); }}>New here? <strong>Create an Account</strong> <ArrowRight size={17} /></button>
+            <p className="login-helper">Use the parent or guardian email connected to your child&apos;s profile.</p>
+            <button type="button" className="create-account-cta" onClick={function () { changeMode("signup"); }}>New here? <strong>Create an account</strong> <ArrowRight size={17} /></button>
           </>}
 
           {mode === "signup" && <button type="button" className="text-button auth-switch" onClick={function () { changeMode("signin"); }}>Already have an account? Sign in</button>}
@@ -292,10 +291,10 @@ export default function LoginScreen(props) {
       </section>
 
       <section className="login-feature-strip">
-        <span>📋 <b>Real Doctor Skills</b></span>
-        <span>🦠 <b>Fun &amp; Safe Learning</b></span>
-        <span>🧰 <b>Interactive Activities</b></span>
-        <span>🏆 <b>Earn Badges &amp; Rewards</b></span>
+        <span><Stethoscope size={16} /> <b>Real Doctor Skills</b></span>
+        <span><ShieldCheck size={16} /> <b>Safe Guided Learning</b></span>
+        <span><BookOpen size={16} /> <b>Interactive Activities</b></span>
+        <span><Trophy size={16} /> <b>Badges and Rewards</b></span>
       </section>
     </main>
   );
