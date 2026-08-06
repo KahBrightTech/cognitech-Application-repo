@@ -14,11 +14,12 @@ spec:
       component: {{ .Values.frontend.component }}
   policyTypes: ["Ingress", "Egress"]
   ingress:
-    # ALB target-type "ip" reaches pods directly from anywhere in the
-    # cluster/VPC, so this stays open to any namespace rather than pinned
-    # to a specific ALB controller pod CIDR.
     - from:
         - namespaceSelector: {}
+        {{- range .Values.networkPolicy.ingressCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: {{ .Values.frontend.containerPort }}
