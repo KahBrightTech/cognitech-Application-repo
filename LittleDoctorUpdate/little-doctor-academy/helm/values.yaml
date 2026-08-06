@@ -62,6 +62,8 @@ frontend:
   tolerations: []
   affinity: {}
   containerSecurityContext:
+    runAsUser: 101
+    runAsGroup: 101
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     capabilities:
