@@ -206,6 +206,31 @@ jobs:
         run: |
           set -euo pipefail
 
+          APP_SELECTOR="app=${RELEASE_NAME}"
+
+          echo "Cleaning Kubernetes workload resources for selector: ${APP_SELECTOR}"
+          kubectl get \
+            deployment,replicaset,pod,service,ingress,horizontalpodautoscaler,poddisruptionbudget,networkpolicy \
+            --namespace "${K8S_NAMESPACE}" \
+            -l "${APP_SELECTOR}" \
+            || true
+
+          kubectl delete \
+            deployment,replicaset,pod,service,ingress,horizontalpodautoscaler,poddisruptionbudget,networkpolicy \
+            --namespace "${K8S_NAMESPACE}" \
+            -l "${APP_SELECTOR}" \
+            --ignore-not-found \
+            --wait=true \
+            || true
+
+          if kubectl api-resources | grep -q '^secretproviderclasses[[:space:]]'; then
+            kubectl delete secretproviderclass \
+              --namespace "${K8S_NAMESPACE}" \
+              -l "${APP_SELECTOR}" \
+              --ignore-not-found \
+              || true
+          fi
+
           mapfile -t RELEASE_SECRETS < <(
             kubectl get secrets \
               --namespace "${K8S_NAMESPACE}" \
@@ -214,7 +239,7 @@ jobs:
           )
 
           if [[ ${#RELEASE_SECRETS[@]} -eq 0 ]]; then
-            echo "No Helm release secrets found for ${RELEASE_NAME} in ${K8S_NAMESPACE}."
+            echo "No Helm release secrets found for ${RELEASE_NAME} in ${K8S_NAMESPACE}. Workload cleanup is complete."
             exit 0
           fi
 
