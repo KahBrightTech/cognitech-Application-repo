@@ -14,7 +14,7 @@ cognito:
   region: "us-east-1"
   secretManager:
     enabled: true
-    secretName: int-production-use1-little-doctor-users/cognitofff0b469a6496e0ce3b12995de
+    secretName: int-production-use1-little-doctor-users/cognito2aca1d73b765e339c74f87c45c
     objectType: secretsmanager
     secretProviderClassName: ""
 
