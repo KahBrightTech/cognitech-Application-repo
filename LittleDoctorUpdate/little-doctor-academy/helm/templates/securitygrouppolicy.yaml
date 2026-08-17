@@ -1,0 +1,17 @@
+{{- if and .Values.securityGroupPolicy.enabled (gt (len .Values.securityGroupPolicy.securityGroups) 0) }}
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: {{ .Values.securityGroupPolicy.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "littledoctor.labels" . | nindent 4 }}
+    component: {{ .Values.frontend.component }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml .Values.securityGroupPolicy.podSelector | nindent 6 }}
+  securityGroups:
+    groupIds:
+      {{- toYaml .Values.securityGroupPolicy.securityGroups | nindent 6 }}
+{{- end }}

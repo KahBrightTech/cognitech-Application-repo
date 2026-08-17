@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "littledoctor.labels" . | nindent 4 }}
+    component: {{ .Values.frontend.component }}
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.global.appLabel }}
+      component: {{ .Values.frontend.component }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.global.appLabel }}
+        component: {{ .Values.frontend.component }}
+      annotations:
+        {{- if and (not .Values.cognito.existingSecret) (not .Values.cognito.secretManager.enabled) }}
+        checksum/cognito-secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if .Values.cognito.secretManager.enabled }}
+        checksum/cognito-secret-provider: {{ include (print $.Template.BasePath "/secretproviderclass.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "littledoctor.serviceAccountName" . }}
+      {{- with .Values.frontend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.frontend.podSecurityContext | nindent 8 }}
+      containers:
+        - name: frontend
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.frontend.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.containerPort }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.frontend.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.frontend.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.frontend.probes.readiness.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.frontend.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.frontend.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.frontend.probes.liveness.periodSeconds }}
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
+            - name: html-config
+              mountPath: /usr/share/nginx/html/config
+            {{- if .Values.cognito.secretManager.enabled }}
+            - name: {{ include "littledoctor.cognitoSecretProviderClassName" . }}
+              mountPath: /etc/secrets
+              readOnly: true
+            {{- else }}
+            - name: cognito-secret
+              mountPath: /etc/secrets
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: nginx-conf
+          emptyDir: {}
+        - name: html-config
+          emptyDir: {}
+        {{- if .Values.cognito.secretManager.enabled }}
+        - name: {{ include "littledoctor.cognitoSecretProviderClassName" . }}
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "littledoctor.cognitoSecretProviderClassName" . | quote }}
+        {{- else }}
+        - name: cognito-secret
+          secret:
+            secretName: {{ include "littledoctor.cognitoSecretName" . }}
+        {{- end }}

@@ -1,0 +1,44 @@
+# Annotations Reference: https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/annotations/
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ingress.ingressname }}
+  labels:
+    {{- include "littledoctor.labels" . | nindent 4 }}
+    component: {{ .Values.frontend.component }}
+  annotations:
+    alb.ingress.kubernetes.io/load-balancer-name: {{ .Values.ingress.alb_name | quote }}
+    alb.ingress.kubernetes.io/scheme: {{ .Values.ingress.scheme | quote }}
+    alb.ingress.kubernetes.io/target-type: {{ .Values.ingress.target_type | quote }}
+    alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.group_name | quote }}
+    {{- range $key, $value := .Values.ingress.healthcheck }}
+    alb.ingress.kubernetes.io/{{ $key }}: {{ $value | quote }}
+    {{- end }}
+    alb.ingress.kubernetes.io/listen-ports: {{ .Values.ingress.listenning_ports | quote }}
+    {{- if .Values.ingress.alb_certificate_arn }}
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.ingress.alb_certificate_arn | quote }}
+    alb.ingress.kubernetes.io/actions.ssl-redirect: '{"Type": "redirect", "RedirectConfig": {"Protocol": "HTTPS", "Port": "443", "StatusCode": "HTTP_301"}}'
+    {{- end }}
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.ingress.hostname | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.ingressclassname }}
+  rules:
+    - host: {{ .Values.ingress.hostname | quote }}
+      http:
+        paths:
+          {{- if .Values.ingress.alb_certificate_arn }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ssl-redirect
+                port:
+                  name: use-annotation
+          {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.frontend.name }}
+                port:
+                  number: {{ .Values.frontend.service.port }}

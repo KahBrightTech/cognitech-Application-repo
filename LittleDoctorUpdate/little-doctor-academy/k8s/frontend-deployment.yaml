@@ -1,55 +1,60 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: littledoctor-frontend
-  namespace: "healthpath"
+  name: littledoctor
+  namespace: infogrid
   labels:
     app: littledoctor
     component: frontend
-
 spec:
   replicas: 2
-
   selector:
     matchLabels:
       app: littledoctor
       component: frontend
-
   template:
     metadata:
       labels:
         app: littledoctor
         component: frontend
-
     spec:
+      serviceAccountName: secret-access
+      nodeSelector:
+        managed-by: karpenter
+        workload-type: application
+      securityContext:
+        fsGroup: 101
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: frontend
-        image: __REGISTRY__:__FRONTEND_TAG__
+        image: __REGISTRY__/int-production-use1-ecs:__FRONTEND_TAG__
         imagePullPolicy: Always
-
+        securityContext:
+          runAsUser: 101
+          runAsGroup: 101
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         ports:
         - name: http
           containerPort: 8080
           protocol: TCP
-
         readinessProbe:
           httpGet:
             path: /healthz
-            port: 8080
+            port: http
           initialDelaySeconds: 5
           periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 3
-
         livenessProbe:
           httpGet:
             path: /healthz
-            port: 8080
+            port: http
           initialDelaySeconds: 10
           periodSeconds: 20
-          timeoutSeconds: 3
-          failureThreshold: 3
-
         resources:
           requests:
             cpu: 25m
@@ -57,26 +62,53 @@ spec:
           limits:
             cpu: 100m
             memory: 128Mi
+        volumeMounts:
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
+        - name: nginx-run
+          mountPath: /var/run
+        - name: tmp
+          mountPath: /tmp
+        - name: nginx-conf
+          mountPath: /etc/nginx/conf.d
+        - name: html-config
+          mountPath: /usr/share/nginx/html/config
+        - name: littledoctor-cognito
+          mountPath: /etc/secrets
+          readOnly: true
+      volumes:
+      - name: nginx-cache
+        emptyDir: {}
+      - name: nginx-run
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      - name: nginx-conf
+        emptyDir: {}
+      - name: html-config
+        emptyDir: {}
+      - name: littledoctor-cognito
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: littledoctor-cognito
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: littledoctor-frontend
-  namespace: "healthpath"
+  name: littledoctor
+  namespace: infogrid
   labels:
     app: littledoctor
     component: frontend
-
 spec:
-  type: NodePort
-
+  type: ClusterIP
   selector:
     app: littledoctor
     component: frontend
-
   ports:
   - name: http
     protocol: TCP
     port: 80
     targetPort: 8080
-    nodePort: 30080

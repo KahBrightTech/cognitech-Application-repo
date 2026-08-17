@@ -1,0 +1,14 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: littledoctor
+  namespace: infogrid
+  labels:
+    app: littledoctor
+    component: frontend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: littledoctor
+      component: frontend

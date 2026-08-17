@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: littledoctor-ingress
+  namespace: infogrid
+  labels:
+    app: littledoctor
+    component: frontend
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: littledoctor.prod.novutechnologies.net
+    nginx.ingress.kubernetes.io/backend-protocol: HTTP
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 16m
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - littledoctor.prod.novutechnologies.net
+    secretName: littledoctor-prod-tls
+  rules:
+  - host: littledoctor.prod.novutechnologies.net
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: littledoctor
+            port:
+              number: 80

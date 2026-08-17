@@ -1,0 +1,4 @@
+Little Doctor Academy - Expanded v3 Reference Character Edition
+Build: 2026-07-17-v5
+Base: expanded-v3 (24 scenarios + game preserved)
+UI: supplied 3D junior doctor character style

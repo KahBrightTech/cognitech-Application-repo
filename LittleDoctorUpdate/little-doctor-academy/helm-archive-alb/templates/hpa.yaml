@@ -1,0 +1,27 @@
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "littledoctor.labels" . | nindent 4 }}
+    component: {{ .Values.frontend.component }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Values.frontend.name }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

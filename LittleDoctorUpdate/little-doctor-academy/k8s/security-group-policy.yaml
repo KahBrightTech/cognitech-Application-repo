@@ -1,0 +1,17 @@
+# Replace the example security group ID before applying this manifest.
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: littledoctor-pod-sgp
+  namespace: infogrid
+  labels:
+    app: littledoctor
+    component: frontend
+spec:
+  podSelector:
+    matchLabels:
+      app: littledoctor
+      component: frontend
+  securityGroups:
+    groupIds:
+    - sg-0123456789abcdef0

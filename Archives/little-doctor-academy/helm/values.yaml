@@ -14,7 +14,7 @@ cognito:
   region: "us-east-1"
   secretManager:
     enabled: true
-    secretName: int-production-use1-little-doctor-users/cognito5e02299c48d7b454c8893209ce
+    secretName: int-production-use1-little-doctor-users/cognito2aca1d73b765e339c74f87c45c
     objectType: secretsmanager
     secretProviderClassName: ""
 
@@ -26,8 +26,9 @@ frontend:
     tag: littledoctor-little-doctor-academy-v1.0.9
   containerPort: 8080
   service:
-    type: ClusterIP
+    type: NodePort
     port: 80
+    nodePort: 30080
     targetPort: 8080
   probes:
     readiness:
@@ -80,31 +81,33 @@ podDisruptionBudget:
   minAvailable: 1
 networkPolicy:
   enabled: true
-  # ingressNamespaces:
-  # - ingress-nginx
+  # ALB target-type=ip reaches pods from VPC IPs, not from Kubernetes pods,
+  # so the frontend policy must allow those source CIDRs as well.
+  # Tighten this to your VPC CIDR(s) once confirmed; 0.0.0.0/0 keeps the
+  # internet-facing ALB working immediately.
   ingressCidrs:
   - 0.0.0.0/0
 
 ingress:
-  enabled: true
-  ingressclassname: "ingress-nginx-prod-litdoc"
+  ingressclassname: alb
   ingressname: littledoctor-ingress
-  annotations:
-    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  alb_name: littledoctor-alb
+  scheme: internet-facing
+  controller: ingress.k8s.aws/alb
+  # ip = register pod IPs directly as ALB targets (via VPC CNI).
+  target_type: ip
+  group_name: littledoctor-alb
+  healthcheck:
+    healthcheck-protocol: "HTTP"
+    healthcheck-port: "traffic-port"
+    healthcheck-path: "/healthz"
+    healthcheck-interval-seconds: "15"
+    healthcheck-timeout-seconds: "5"
+    success-codes: "200"
+    healthy-threshold-count: "2"
+    unhealthy-threshold-count: "2"
+  # Leave blank to skip HTTPS/the ssl-redirect rule (e.g. local/dev clusters
+  # without an ACM cert yet).
+  alb_certificate_arn: "arn:aws:acm:us-east-1:271457809232:certificate/31b4636f-d7d5-4109-80f2-6892489df997"
+  listenning_ports: '[{"HTTPS":443}, {"HTTP":80}]'
   hostname: "littledoctor.prod.novutechnologies.net"
-  path: /
-  pathType: Prefix
-  tls:
-    enabled: false
-    secretName: "littledoctor-prod-tls"
-
-securityGroupPolicy:
-  enabled: false
-  name: littledoctor-pod-sgp
-  podSelector:
-    app: littledoctor
-    component: frontend
-  securityGroups: [ "sg-0ba13a3984f9a8b7a" ]
