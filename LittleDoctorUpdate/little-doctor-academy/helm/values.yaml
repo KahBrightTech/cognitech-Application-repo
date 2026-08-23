@@ -91,9 +91,7 @@ ingress:
   ingressname: littledoctor-ingress
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "16m"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
   hostname: "littledoctor.prod.novutechnologies.net"
   path: /
   pathType: Prefix

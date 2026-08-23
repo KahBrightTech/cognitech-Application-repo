@@ -7,13 +7,13 @@ metadata:
   labels:
     {{- include "littledoctor.labels" . | nindent 4 }}
     component: {{ .Values.frontend.component }}
-  {{- with .Values.ingress.annotations }}
   annotations:
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- if .Values.ingress.hostname }}
+    {{- end }}
+    {{- if .Values.ingress.hostname }}
     external-dns.alpha.kubernetes.io/hostname: {{ .Values.ingress.hostname | quote }}
-  {{- end }}
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.ingressclassname }}
   {{- if .Values.ingress.tls.enabled }}
