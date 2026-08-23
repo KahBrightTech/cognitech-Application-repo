@@ -14,7 +14,7 @@ cognito:
   region: "us-east-1"
   secretManager:
     enabled: true
-    secretName: int-production-use1-little-doctor-users/cognito5e02299c48d7b454c8893209ce
+    secretName: int-production-use1-little-doctor-users/cognitoafb68a4ea5d4772aba63081b46
     objectType: secretsmanager
     secretProviderClassName: ""
 
@@ -23,7 +23,7 @@ frontend:
   component: frontend
   replicaCount: 2
   image:
-    tag: littledoctor-little-doctor-academy-v1.0.9
+    tag: littledoctor-little-doctor-academy-v1.0.10
   containerPort: 8080
   service:
     type: ClusterIP
@@ -107,4 +107,4 @@ securityGroupPolicy:
   podSelector:
     app: littledoctor
     component: frontend
-  securityGroups: [ "sg-0ba13a3984f9a8b7a" ]
+  securityGroups: [ "sg-0fb243b45a750f6b5" ]
