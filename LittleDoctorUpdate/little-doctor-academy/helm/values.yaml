@@ -14,7 +14,7 @@ cognito:
   region: "us-east-1"
   secretManager:
     enabled: true
-    secretName: int-production-use1-little-doctor-users/cognitoafb68a4ea5d4772aba63081b46
+    secretName: int-production-use1-little-doctor-users/cognitod6df50213d98978a1e21a37946
     objectType: secretsmanager
     secretProviderClassName: ""
 
@@ -60,6 +60,21 @@ frontend:
     workload-type: application
   tolerations: []
   affinity: {}
+  topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app: littledoctor
+        component: frontend
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app: littledoctor
+        component: frontend
   containerSecurityContext:
     runAsUser: 101
     runAsGroup: 101
@@ -90,13 +105,16 @@ ingress:
   ingressclassname: "ingress-nginx-prod-litdoc"
   ingressname: littledoctor-ingress
   annotations:
+    cert-manager.io/cluster-issuer: "ncrypt-prod-route53"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
   hostname: "littledoctor.prod.novutechnologies.net"
   path: /
   pathType: Prefix
   tls:
-    enabled: false
+    enabled: true
     secretName: "littledoctor-prod-tls"
 
 securityGroupPolicy:
@@ -105,4 +123,4 @@ securityGroupPolicy:
   podSelector:
     app: littledoctor
     component: frontend
-  securityGroups: [ "sg-0fb243b45a750f6b5" ]
+  securityGroups: [ "sg-01818a20c43c47ca0" ]
