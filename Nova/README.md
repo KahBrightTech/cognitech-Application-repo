@@ -174,7 +174,8 @@ and follows the same engine as the other apps in this repo.
    (`ruff` + `pytest` for Python, `npm` scripts + production build for Node).
 4. **Scans the source** with Trivy (filesystem) and uploads SARIF to the Security tab.
 5. **Builds the image**, then **scans the image** with Trivy.
-6. **Pushes two tags** to ECR: the new version and `latest`.
+6. **Pushes the versioned tag** to ECR, then moves `latest` **only if the
+   repository allows mutable tags** (see below).
 
 It does **not** deploy to EKS — that is handled separately by the release process.
 
@@ -191,15 +192,21 @@ Images go to the CDK container-assets repository
 `cdk-hnb659fds-container-assets-533267408704-us-east-1` in `us-east-1`:
 
 ```text
-533267408704.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-533267408704-us-east-1:nova-backend-v1.0.0
-533267408704.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-533267408704-us-east-1:nova-backend-latest
-533267408704.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-533267408704-us-east-1:nova-frontend-v1.0.0
-533267408704.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-533267408704-us-east-1:nova-frontend-latest
+533267408704.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-533267408704-us-east-1:nova-backend-v1.0.1
+533267408704.dkr.ecr.us-east-1.amazonaws.com/cdk-hnb659fds-container-assets-533267408704-us-east-1:nova-frontend-v1.0.1
 ```
 
 The patch number auto-increments from the highest existing `nova-<component>-vX.Y.Z` tag
 in ECR. For a minor or major bump, run the workflow manually and set **version** to e.g.
 `v1.1.0`.
+
+> **No `latest` tag on this registry.** CDK bootstrap asset repositories are created
+> with `imageTagMutability: IMMUTABLE`, so a moving `latest` pointer cannot be
+> repointed at a new digest — the push is rejected with
+> `tag invalid: ... cannot be overwritten because the tag is immutable`.
+> The workflow detects this and skips `latest`, so **always deploy by explicit
+> version tag**. If you want `latest` back, push to a repository created with
+> `--image-tag-mutability MUTABLE`.
 
 ### Authentication
 
@@ -210,7 +217,9 @@ account, region, or repository, edit the `env:` block at the top of the workflow
 The role's trust policy must allow this repository, and its permissions policy needs
 `ecr:GetAuthorizationToken` plus `ecr:BatchCheckLayerAvailability`,
 `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`,
-`ecr:PutImage`, and `ecr:DescribeImages` on the target repository.
+`ecr:PutImage`, `ecr:DescribeImages`, and `ecr:DescribeRepositories` on the target
+repository. `DescribeImages` drives the version auto-increment and
+`DescribeRepositories` is how the workflow detects immutable tags.
 
 ### Deploy checklist
 
@@ -254,3 +263,4 @@ docker pull "$registry/${repo}:nova-backend-latest"
 | Trivy fails the CI build | Only when **fail_on_scan** is enabled on a manual run. Otherwise findings are reported to the Security tab without blocking. |
 | CI fails at `Configure AWS credentials` | The OIDC role's trust policy doesn't allow this repo, or the ARN in the workflow `env:` block is wrong. |
 | CI fails at `Push to ECR` with `AccessDenied` | The role is missing ECR push permissions on `cdk-hnb659fds-container-assets-533267408704-us-east-1`. |
+| `tag invalid: ... the tag is immutable` | The registry has immutable tags and something tried to move `latest`. The workflow now skips `latest` automatically — deploy by version tag instead. |

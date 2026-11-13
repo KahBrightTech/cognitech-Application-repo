@@ -412,18 +412,43 @@ jobs:
         continue-on-error: true
 
       # ----------------------------------------------------------------
-      # Push version + latest tags to ECR
+      # Push the versioned tag, then move 'latest' if the registry allows it
       # ----------------------------------------------------------------
       - name: Push to ECR
         run: |
+          set -e
+
           echo "⬆️  Pushing versioned image..."
           docker push "${{ steps.version.outputs.image_tag }}"
+
+          # CDK bootstrap asset repositories are created with IMMUTABLE tags, so a
+          # moving 'latest' pointer cannot be repointed at a new digest.
+          MUTABILITY=$(aws ecr describe-repositories \
+            --repository-names "${ECR_REPOSITORY}" \
+            --region "${AWS_REGION}" \
+            --query 'repositories[0].imageTagMutability' \
+            --output text 2>/dev/null || echo "UNKNOWN")
+          echo "🔖 Repository tag mutability: ${MUTABILITY}"
+
+          if [ "$MUTABILITY" = "IMMUTABLE" ]; then
+            echo "⏭️  Skipping the 'latest' tag - this repository has immutable tags."
+            echo "✅ Pushed: ${{ steps.version.outputs.image_tag }}"
+            exit 0
+          fi
+
           echo "🏷️  Tagging + pushing latest..."
           docker tag "${{ steps.version.outputs.image_tag }}" "${{ steps.version.outputs.image_latest }}"
-          docker push "${{ steps.version.outputs.image_latest }}"
-          echo "✅ Pushed:"
-          echo "   - ${{ steps.version.outputs.image_tag }}"
-          echo "   - ${{ steps.version.outputs.image_latest }}"
+
+          # The versioned push above already proved auth and connectivity, so a
+          # failure here is a tag-policy problem and must not fail the build.
+          if docker push "${{ steps.version.outputs.image_latest }}"; then
+            echo "✅ Pushed:"
+            echo "   - ${{ steps.version.outputs.image_tag }}"
+            echo "   - ${{ steps.version.outputs.image_latest }}"
+          else
+            echo "⚠️  Could not update 'latest' - the versioned image above is published."
+            echo "✅ Pushed: ${{ steps.version.outputs.image_tag }}"
+          fi
 
       - name: Summary
         run: |
