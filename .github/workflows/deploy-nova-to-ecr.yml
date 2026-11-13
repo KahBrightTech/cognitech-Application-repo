@@ -92,14 +92,23 @@ jobs:
         run: |
           set -e
 
+          # The app folder can be archived or renamed while this workflow still
+          # watches its old path, so a missing folder is a no-op, not a failure.
+          if [ ! -d "$APP_DIR" ]; then
+            echo "⏭️  App folder '$APP_DIR' no longer exists. Nothing to build."
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # --- Auto-discover components: every directory with a Dockerfile ---
           mapfile -t DFILES < <(find "$APP_DIR" -type f -iname 'Dockerfile' -not -path '*/node_modules/*' | sort)
 
           if [ ${#DFILES[@]} -eq 0 ]; then
-            echo "❌ No Dockerfile found under '$APP_DIR'. Nothing to build."
+            echo "⏭️  No Dockerfile found under '$APP_DIR'. Nothing to build."
             echo "any=false" >> "$GITHUB_OUTPUT"
             echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
-            exit 1
+            exit 0
           fi
 
           # --- Manual runs build everything; pushes build only what changed ---
