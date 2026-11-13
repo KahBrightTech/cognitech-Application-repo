@@ -1,0 +1,42 @@
+services:
+
+  # ── FastAPI Backend (NOVA core) ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nova-backend
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+      NOVA_CITY: ${NOVA_CITY:-San Francisco}
+      NOVA_ALLOWED_ORIGINS: ${NOVA_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+    ports:
+      - "8000:8000"          # exposed for direct API debugging (optional)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - nova-net
+
+  # ── React Frontend (nginx) ───────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nova-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"            # main app entrypoint -> http://localhost:8080
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - nova-net
+
+networks:
+  nova-net:
+    driver: bridge

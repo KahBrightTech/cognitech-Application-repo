@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-nova-void text-slate-200 font-sans antialiased;
+    overflow-x: hidden;
+  }
+
+  ::selection {
+    @apply bg-nova-violet/40 text-white;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-white/10;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-nova-violet/50;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur-2xl;
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+      0 24px 60px -30px rgba(0, 0, 0, 0.9);
+  }
+
+  .glass-hover {
+    @apply transition-all duration-500 hover:border-nova-violet/40 hover:bg-white/[0.07];
+  }
+
+  /* inline-block + padding keeps the clip box larger than the glyphs */
+  .text-aurora {
+    @apply inline-block bg-gradient-to-r from-nova-ice via-nova-orchid to-nova-plasma bg-clip-text pb-[0.14em] pr-[0.06em] text-transparent;
+  }
+
+  .hairline {
+    @apply border-white/[0.07];
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
